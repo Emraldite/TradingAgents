@@ -39,6 +39,7 @@ app = typer.Typer(
     name="TradingAgents",
     help="TradingAgents CLI: Multi-Agents LLM Financial Trading Framework",
     add_completion=True,  # Enable shell completion
+    pretty_exceptions_show_locals=False,
 )
 
 
@@ -1261,6 +1262,425 @@ def run_analysis(checkpoint: bool = False):
     display_choice = typer.prompt("\nDisplay full report on screen?", default="Y").strip().upper()
     if display_choice in ("Y", "YES", ""):
         display_complete_report(final_state)
+
+
+@app.command("broker-status")
+def broker_status(
+    limit: int = typer.Option(
+        10,
+        "--limit",
+        "-n",
+        min=1,
+        max=100,
+        help="Number of recent Alpaca orders to show.",
+    ),
+    status: str = typer.Option(
+        "all",
+        "--status",
+        help="Order status filter: open, closed, or all.",
+    ),
+):
+    """Show Alpaca paper account, current positions, and recent orders."""
+    from tradingagents.execution.alpaca_executor import AlpacaExecutor
+
+    executor = AlpacaExecutor()
+    account = executor.get_account_info()
+    if account is None:
+        console.print("[red]Could not fetch Alpaca account info. Check your .env keys.[/red]")
+        raise typer.Exit(1)
+
+    account_table = Table(title="Alpaca Paper Account", box=box.SIMPLE)
+    account_table.add_column("Metric", style="cyan")
+    account_table.add_column("Value", justify="right")
+    account_table.add_row("Cash", f"${account['cash']:,.2f}")
+    account_table.add_row("Portfolio Value", f"${account['portfolio_value']:,.2f}")
+    account_table.add_row("Buying Power", f"${account['buying_power']:,.2f}")
+    account_table.add_row("Day Trades", str(account["day_trade_count"]))
+    console.print(account_table)
+
+    positions = executor.get_portfolio()
+    positions_table = Table(title="Open Positions", box=box.SIMPLE)
+    positions_table.add_column("Ticker", style="cyan")
+    positions_table.add_column("Qty", justify="right")
+    positions_table.add_column("Market Value", justify="right")
+    positions_table.add_column("Cost Basis", justify="right")
+    positions_table.add_column("Unrealized P/L", justify="right")
+    if positions:
+        for position in positions:
+            positions_table.add_row(
+                position["ticker"],
+                f"{position['qty']:,.6f}",
+                f"${position['market_value']:,.2f}",
+                f"${position['cost_basis']:,.2f}",
+                f"${position['unrealized_pl']:,.2f}",
+            )
+    else:
+        positions_table.add_row("-", "-", "-", "-", "-")
+    console.print(positions_table)
+
+    orders = executor.get_recent_orders(limit=limit, status=status)
+    orders_table = Table(title=f"Recent Orders ({status})", box=box.SIMPLE)
+    orders_table.add_column("Ticker", style="cyan")
+    orders_table.add_column("Side")
+    orders_table.add_column("Status")
+    orders_table.add_column("Notional", justify="right")
+    orders_table.add_column("Filled Qty", justify="right")
+    orders_table.add_column("Avg Price", justify="right")
+    orders_table.add_column("Submitted")
+    if orders:
+        for order in orders:
+            orders_table.add_row(
+                order["ticker"],
+                order["side"],
+                order["status"],
+                f"${order['notional']:,.2f}",
+                f"{order['filled_qty']:,.6f}",
+                f"${order['filled_avg_price']:,.2f}",
+                str(order.get("submitted_at") or "-"),
+            )
+    else:
+        orders_table.add_row("-", "-", "-", "-", "-", "-", "-")
+    console.print(orders_table)
+
+
+def _parse_ticker_csv(tickers: Optional[str]) -> list[str] | None:
+    if not tickers:
+        return None
+    parsed = [ticker.strip().upper() for ticker in tickers.split(",") if ticker.strip()]
+    return parsed or None
+
+
+def _latest_price(ticker: str) -> float | None:
+    try:
+        import yfinance as yf
+
+        data = yf.download(
+            ticker,
+            period="5d",
+            progress=False,
+            auto_adjust=False,
+        )
+        if data.empty or "Close" not in data:
+            return None
+        value = data["Close"].iloc[-1]
+        if hasattr(value, "iloc"):
+            value = value.iloc[-1]
+        return float(value)
+    except Exception:
+        return None
+
+
+@app.command("strategy-status")
+def strategy_status(
+    limit: int = typer.Option(
+        10,
+        "--limit",
+        "-n",
+        min=1,
+        max=100,
+        help="Number of recent strategy trades/cycles to show.",
+    ),
+    prices: bool = typer.Option(
+        True,
+        "--prices/--no-prices",
+        help="Fetch latest yfinance prices for strategy P&L estimates.",
+    ),
+):
+    """Show local strategy DB state and broker-vs-strategy mismatches."""
+    from tradingagents.default_config import DEFAULT_CONFIG
+    from tradingagents.execution.alpaca_executor import AlpacaExecutor
+    from tradingagents.state_store import StrategyStateStore
+
+    store = StrategyStateStore(DEFAULT_CONFIG.get("data_cache_dir", "data") + "/strategy_state.db")
+    executor = AlpacaExecutor()
+
+    strategy_positions = store.active_positions()
+    broker_positions = executor.get_portfolio()
+    broker_by_ticker = {position["ticker"]: position for position in broker_positions}
+    strategy_by_ticker = {position["ticker"]: position for position in strategy_positions}
+
+    positions_table = Table(title="Strategy DB Positions", box=box.SIMPLE)
+    positions_table.add_column("Ticker", style="cyan")
+    positions_table.add_column("Status")
+    positions_table.add_column("Mode")
+    positions_table.add_column("Entry Date")
+    positions_table.add_column("Entry", justify="right")
+    positions_table.add_column("Qty", justify="right")
+    positions_table.add_column("Broker Qty", justify="right")
+    positions_table.add_column("P&L", justify="right")
+    positions_table.add_column("Stop Order")
+    positions_table.add_column("Last Reconciled")
+    if strategy_positions:
+        for position in strategy_positions:
+            latest = _latest_price(position["ticker"]) if prices else None
+            qty = float(position.get("quantity") or 0)
+            entry = float(position.get("entry_price") or 0)
+            pnl = (latest - entry) * qty if latest is not None and entry > 0 else None
+            positions_table.add_row(
+                str(position["ticker"]),
+                str(position["status"]),
+                str(position["mode"]),
+                str(position.get("entry_date") or "-"),
+                f"${entry:,.2f}",
+                f"{qty:,.6f}",
+                f"{float(position.get('broker_quantity') or 0):,.6f}",
+                f"${pnl:,.2f}" if pnl is not None else "-",
+                str(position.get("stop_order_id") or "-"),
+                str(position.get("last_reconciled_at") or "-"),
+            )
+    else:
+        positions_table.add_row("-", "-", "-", "-", "-", "-", "-", "-", "-", "-")
+    console.print(positions_table)
+
+    mismatch_table = Table(title="Broker vs Strategy Diff", box=box.SIMPLE)
+    mismatch_table.add_column("Ticker", style="cyan")
+    mismatch_table.add_column("Strategy Qty", justify="right")
+    mismatch_table.add_column("Broker Qty", justify="right")
+    mismatch_table.add_column("Issue")
+    mismatches = []
+    for ticker in sorted(set(strategy_by_ticker) | set(broker_by_ticker)):
+        strategy_qty = float(strategy_by_ticker.get(ticker, {}).get("quantity") or 0)
+        broker_qty = float(broker_by_ticker.get(ticker, {}).get("qty") or 0)
+        if abs(strategy_qty - broker_qty) > 0.0001:
+            if ticker not in broker_by_ticker:
+                issue = "strategy only"
+            elif ticker not in strategy_by_ticker:
+                issue = "broker only"
+            else:
+                issue = "quantity mismatch"
+            mismatches.append((ticker, strategy_qty, broker_qty, issue))
+            mismatch_table.add_row(
+                ticker,
+                f"{strategy_qty:,.6f}",
+                f"{broker_qty:,.6f}",
+                issue,
+            )
+    if not mismatches:
+        mismatch_table.add_row("-", "-", "-", "no mismatch")
+    console.print(mismatch_table)
+
+    cooldowns_table = Table(title="Active Cooldowns", box=box.SIMPLE)
+    cooldowns_table.add_column("Ticker", style="cyan")
+    cooldowns_table.add_column("Cooldown Until")
+    cooldowns_table.add_column("Reason")
+    cooldowns = store.active_cooldowns()
+    if cooldowns:
+        for cooldown in cooldowns:
+            cooldowns_table.add_row(
+                str(cooldown["ticker"]),
+                str(cooldown["cooldown_until"]),
+                str(cooldown.get("reason") or "-"),
+            )
+    else:
+        cooldowns_table.add_row("-", "-", "-")
+    console.print(cooldowns_table)
+
+    cycles_table = Table(title=f"Recent Strategy Cycles ({limit})", box=box.SIMPLE)
+    cycles_table.add_column("ID", justify="right", style="cyan")
+    cycles_table.add_column("Mode")
+    cycles_table.add_column("Status")
+    cycles_table.add_column("Tickers", justify="right")
+    cycles_table.add_column("Actions")
+    cycles_table.add_column("Started")
+    cycles = store.recent_cycles(limit=limit)
+    for cycle in cycles:
+        cycles_table.add_row(
+            str(cycle["cycle_id"]),
+            str(cycle["mode"]),
+            str(cycle["status"]),
+            str(cycle["ticker_count"]),
+            str(cycle["action_summary"]),
+            str(cycle["started_at"]),
+        )
+    if not cycles:
+        cycles_table.add_row("-", "-", "-", "-", "-", "-")
+    console.print(cycles_table)
+
+    trades_table = Table(title=f"Recent Strategy Trades ({limit})", box=box.SIMPLE)
+    trades_table.add_column("ID", justify="right", style="cyan")
+    trades_table.add_column("Ticker")
+    trades_table.add_column("Side")
+    trades_table.add_column("Qty", justify="right")
+    trades_table.add_column("Price", justify="right")
+    trades_table.add_column("Reason")
+    trades_table.add_column("Mode")
+    trades_table.add_column("Time")
+    trades = store.recent_trades(limit=limit)
+    if trades:
+        for trade in trades:
+            trades_table.add_row(
+                str(trade["trade_id"]),
+                str(trade["ticker"]),
+                str(trade["side"]),
+                f"{float(trade['quantity']):,.6f}",
+                f"${float(trade['fill_price']):,.2f}",
+                str(trade.get("reason") or "-"),
+                str(trade["mode"]),
+                str(trade["timestamp"]),
+            )
+    else:
+        trades_table.add_row("-", "-", "-", "-", "-", "-", "-", "-")
+    console.print(trades_table)
+
+
+@app.command("run-cycle")
+def run_cycle_command(
+    mode: str = typer.Option(
+        "dry-run",
+        "--mode",
+        help="Execution mode: dry-run, shadow, or live.",
+    ),
+    tickers: Optional[str] = typer.Option(
+        None,
+        "--tickers",
+        help="Comma-separated ticker list. Filtered to the conviction watchlist unless bypassed.",
+    ),
+    allow_manual_tickers: bool = typer.Option(
+        False,
+        "--allow-manual-tickers",
+        help="Allow manual tickers to bypass the congressional conviction watchlist.",
+    ),
+    min_conviction: int = typer.Option(
+        6,
+        "--min-conviction",
+        min=1,
+        max=10,
+        help="Minimum congressional conviction score.",
+    ),
+    lookback_days: int = typer.Option(
+        45,
+        "--lookback-days",
+        min=1,
+        help="Congressional disclosure lookback window.",
+    ),
+):
+    """Run one background trading cycle."""
+    from tradingagents.scheduler.runner import run_cycle
+
+    try:
+        summary = run_cycle(
+            tickers=_parse_ticker_csv(tickers),
+            min_conviction=min_conviction,
+            lookback_days=lookback_days,
+            allow_manual_tickers=allow_manual_tickers,
+            mode=mode,
+        )
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(2) from exc
+
+    if not summary:
+        console.print("[yellow]Cycle did not return a summary.[/yellow]")
+        return
+
+    table = Table(title="Cycle Summary", box=box.SIMPLE)
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", justify="right")
+    table.add_row("Mode", str(summary.get("mode")))
+    table.add_row("Status", str(summary.get("status")))
+    table.add_row("Tickers", str(summary.get("tickers", 0)))
+    table.add_row("Signals", str(summary.get("signals", 0)))
+    table.add_row("Executed", str(summary.get("executed", 0)))
+    table.add_row("Simulated", str(summary.get("simulated", 0)))
+    if summary.get("reason"):
+        table.add_row("Reason", str(summary["reason"]))
+    console.print(table)
+
+
+@app.command("run-bot")
+def run_bot_command(
+    mode: str = typer.Option(
+        "dry-run",
+        "--mode",
+        help="Execution mode: dry-run, shadow, or live.",
+    ),
+    interval: int = typer.Option(
+        30,
+        "--interval",
+        min=1,
+        help="Minutes between cycles.",
+    ),
+    tickers: Optional[str] = typer.Option(
+        None,
+        "--tickers",
+        help="Comma-separated ticker list. Filtered to the conviction watchlist unless bypassed.",
+    ),
+    allow_manual_tickers: bool = typer.Option(
+        False,
+        "--allow-manual-tickers",
+        help="Allow manual tickers to bypass the congressional conviction watchlist.",
+    ),
+):
+    """Run the bot continuously until stopped."""
+    from tradingagents.scheduler.runner import start_scheduler
+
+    console.print(
+        f"[cyan]Starting bot[/cyan]: mode={mode}, interval={interval}m. Press Ctrl+C to stop."
+    )
+    try:
+        start_scheduler(
+            interval_minutes=interval,
+            mode=mode,
+            tickers=_parse_ticker_csv(tickers),
+            allow_manual_tickers=allow_manual_tickers,
+        )
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(2) from exc
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Bot stopped cleanly.[/yellow]")
+
+
+@app.command("replay")
+def replay_command(
+    cycle_id: int = typer.Option(
+        ...,
+        "--cycle-id",
+        min=1,
+        help="Stored strategy cycle id to replay from SQLite snapshots.",
+    ),
+):
+    """Show stored decisions for a previous cycle without calling live APIs."""
+    from tradingagents.scheduler.runner import replay_cycle
+
+    try:
+        replay = replay_cycle(cycle_id)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    summary = Table(title=f"Replay Cycle {cycle_id}", box=box.SIMPLE)
+    summary.add_column("Metric", style="cyan")
+    summary.add_column("Value", justify="right")
+    summary.add_row("Mode", str(replay.get("mode")))
+    summary.add_row("Status", str(replay.get("status")))
+    summary.add_row("Started", str(replay.get("started_at")))
+    summary.add_row("Completed", str(replay.get("completed_at") or "-"))
+    summary.add_row("Tickers", ", ".join(replay.get("tickers") or []) or "-")
+    if replay.get("error"):
+        summary.add_row("Error", str(replay["error"]))
+    console.print(summary)
+
+    decisions_table = Table(title="Stored Decisions", box=box.SIMPLE)
+    decisions_table.add_column("Ticker", style="cyan")
+    decisions_table.add_column("Decision")
+    decisions_table.add_column("Reason")
+    decisions_table.add_column("Details")
+    for decision in replay.get("decisions") or []:
+        details = ", ".join(
+            f"{k}={v}"
+            for k, v in decision.items()
+            if k not in {"ticker", "decision", "reason"}
+        )
+        decisions_table.add_row(
+            str(decision.get("ticker", "-")),
+            str(decision.get("decision", "-")),
+            str(decision.get("reason", "-")),
+            details or "-",
+        )
+    if not replay.get("decisions"):
+        decisions_table.add_row("-", "-", "-", "-")
+    console.print(decisions_table)
 
 
 @app.command()

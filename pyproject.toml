@@ -23,6 +23,7 @@ dependencies = [
     "questionary>=2.1.0",
     "redis>=6.2.0",
     "requests>=2.32.4",
+    "beautifulsoup4>=4.12.0",
     "rich>=14.0.0",
     "typer>=0.21.0",
     "setuptools>=80.9.0",
@@ -30,6 +31,12 @@ dependencies = [
     "tqdm>=4.67.1",
     "typing-extensions>=4.14.0",
     "yfinance>=0.2.63",
+    "vectorbt>=1.0.0",
+    "riskfolio-lib>=7.0.1",
+    "newsapi-python>=0.2.7",
+    "schedule>=1.2.2",
+    "textblob>=0.20.0",
+    "vadersentiment>=3.3.2",
 ]
 
 [project.scripts]
@@ -51,4 +58,9 @@ markers = [
 ]
 filterwarnings = [
     "ignore::DeprecationWarning",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
 ]

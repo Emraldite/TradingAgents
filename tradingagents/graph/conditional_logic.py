@@ -19,6 +19,13 @@ class ConditionalLogic:
             return "tools_market"
         return "Msg Clear Market"
 
+    def should_continue_congressional(self, state: AgentState):
+        messages = state["messages"]
+        last_message = messages[-1]
+        if last_message.tool_calls:
+            return "tools_congressional"
+        return "Msg Clear Congressional"
+
     def should_continue_social(self, state: AgentState):
         """Determine if sentiment-analyst tool round should continue.
 

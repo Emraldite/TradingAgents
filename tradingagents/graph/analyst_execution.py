@@ -26,6 +26,13 @@ ANALYST_NODE_SPECS: Dict[str, AnalystNodeSpec] = {
         tool_node="tools_market",
         report_key="market_report",
     ),
+    "congressional": AnalystNodeSpec(
+        key="congressional",
+        agent_node="Congressional Analyst",
+        clear_node="Msg Clear Congressional",
+        tool_node="tools_congressional",
+        report_key="congressional_report",
+    ),
     "social": AnalystNodeSpec(
         # Wire key stays "social" for saved-config back-compat; the
         # user-facing label is "Sentiment Analyst" to match the rename

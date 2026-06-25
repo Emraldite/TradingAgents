@@ -2,10 +2,16 @@
 
 import logging
 import os
+import sys
 from pathlib import Path
 import json
 from datetime import datetime, timedelta
 from typing import Dict, Any, Tuple, List, Optional
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except (AttributeError, OSError):
+    pass
 
 import yfinance as yf
 
@@ -52,7 +58,7 @@ class TradingAgentsGraph:
 
     def __init__(
         self,
-        selected_analysts=["market", "social", "news", "fundamentals"],
+        selected_analysts=["congressional", "market", "social", "news", "fundamentals"],
         debug=False,
         config: Dict[str, Any] = None,
         callbacks: Optional[List] = None,
@@ -166,6 +172,7 @@ class TradingAgentsGraph:
                     get_indicators,
                 ]
             ),
+            "congressional": ToolNode([]),
             "social": ToolNode(
                 [
                     # News tools for social media analysis
@@ -390,6 +397,7 @@ class TradingAgentsGraph:
             "company_of_interest": final_state["company_of_interest"],
             "trade_date": final_state["trade_date"],
             "market_report": final_state["market_report"],
+            "congressional_report": final_state["congressional_report"],
             "sentiment_report": final_state["sentiment_report"],
             "news_report": final_state["news_report"],
             "fundamentals_report": final_state["fundamentals_report"],

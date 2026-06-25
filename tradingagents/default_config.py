@@ -81,6 +81,11 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "news_article_limit": 20,             # max articles per ticker (ticker-news)
     "global_news_article_limit": 10,      # max articles for global/macro news
     "global_news_lookback_days": 7,       # macro news lookback window
+    # Congressional trading agent settings
+    "congressional_lookback_days": 45,
+    "congressional_min_conviction_score": 6,
+    "committee_alignment_required": True,
+    "congressional_cache_hours": 6,
     # Search queries used by get_global_news for macro headlines. Extend or
     # replace to broaden geographic / sector coverage.
     "global_news_queries": [

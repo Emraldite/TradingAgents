@@ -149,8 +149,11 @@ activemq-data/
 
 # Environments
 .env
+.env.*
+!.env.example
+!.env.enterprise.example
 .envrc
-.venv
+.venv/
 env/
 venv/
 ENV/
@@ -215,5 +218,38 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Cache
+# Cache directories
 **/data_cache/
+.uv-cache/
+uv-cache/
+
+# Project-specific: local SQLite databases (API caches, strategy state, performance tracking)
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+data/*-journal
+data/*.db-journal
+data/*.db-shm
+data/*.db-wal
+*.sqlite
+*.sqlite3
+
+# Auto-generated strategy/backtest/report outputs
+backtests/results/*.csv
+backtests/results/
+reports/
+results/
+runs/
+
+# Logs and VM/background-run output
+logs/
+*.out
+nohup.out
+*.pid
+*.log.*
+
+# Agent memory (personal preferences, decisions)
+.AGENTS/
+
+# uv python pin
+.python-version
