@@ -20,18 +20,9 @@ from rich import box
 from rich.align import Align
 from rich.rule import Rule
 
-from tradingagents.graph.trading_graph import TradingAgentsGraph
-from tradingagents.graph.analyst_execution import (
-    AnalystWallTimeTracker,
-    build_analyst_execution_plan,
-    get_initial_analyst_node,
-    sync_analyst_tracker_from_chunk,
-)
 from tradingagents.default_config import DEFAULT_CONFIG
 from cli.models import AnalystType
 from cli.utils import *
-from cli.announcements import fetch_announcements, display_announcements
-from cli.stats_handler import StatsCallbackHandler
 
 console = Console()
 
@@ -465,6 +456,8 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
 
 def get_user_selections():
     """Get all user selections before starting the analysis display."""
+    from cli.announcements import fetch_announcements, display_announcements
+
     # Display ASCII art welcome message
     with open(Path(__file__).parent / "static" / "welcome.txt", "r", encoding="utf-8") as f:
         welcome_ascii = f.read()
@@ -871,6 +864,8 @@ def update_analyst_statuses(message_buffer, chunk, wall_time_tracker=None):
     found_active = False
 
     if wall_time_tracker is not None:
+        from tradingagents.graph.analyst_execution import sync_analyst_tracker_from_chunk
+
         sync_analyst_tracker_from_chunk(wall_time_tracker, chunk)
 
     for analyst_key in ANALYST_ORDER:
@@ -976,6 +971,14 @@ def format_tool_args(args, max_length=80) -> str:
     return result
 
 def run_analysis(checkpoint: bool = False):
+    from cli.stats_handler import StatsCallbackHandler
+    from tradingagents.graph.analyst_execution import (
+        AnalystWallTimeTracker,
+        build_analyst_execution_plan,
+        get_initial_analyst_node,
+    )
+    from tradingagents.graph.trading_graph import TradingAgentsGraph
+
     # First get all user selections
     selections = get_user_selections()
 

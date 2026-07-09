@@ -87,6 +87,12 @@ Run a no-foresight historical simulation before trusting a signal live:
 uv run tradingagents walk-forward --ticker AAPL --start 2020-01-01 --end 2025-01-01 --position-pct 0.02
 ```
 
+If `uv run` is blocked by a local uv cache issue on Windows, use the project venv directly:
+
+```powershell
+.\.venv\Scripts\python.exe -c "import sys; sys.stdout.reconfigure(encoding='utf-8'); from typer.testing import CliRunner; from cli.main import app; result = CliRunner().invoke(app, ['walk-forward', '--ticker', 'AAPL', '--start', '2020-01-01', '--end', '2025-01-01', '--position-pct', '0.02']); print(result.output)"
+```
+
 ## CLI Analysis
 
 Run the interactive multi-agent analyst workflow:
