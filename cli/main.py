@@ -1533,12 +1533,12 @@ def run_cycle_command(
     tickers: Optional[str] = typer.Option(
         None,
         "--tickers",
-        help="Comma-separated ticker list. Filtered to the conviction watchlist unless bypassed.",
+        help="Comma-separated ticker list. Manual tickers are allowed by default.",
     ),
     allow_manual_tickers: bool = typer.Option(
-        False,
-        "--allow-manual-tickers",
-        help="Allow manual tickers to bypass the congressional conviction watchlist.",
+        True,
+        "--allow-manual-tickers/--no-allow-manual-tickers",
+        help="Allow manual tickers to trade even when they are not on the congressional watchlist.",
     ),
     min_conviction: int = typer.Option(
         6,
@@ -1603,12 +1603,12 @@ def run_bot_command(
     tickers: Optional[str] = typer.Option(
         None,
         "--tickers",
-        help="Comma-separated ticker list. Filtered to the conviction watchlist unless bypassed.",
+        help="Comma-separated ticker list. Manual tickers are allowed by default.",
     ),
     allow_manual_tickers: bool = typer.Option(
-        False,
-        "--allow-manual-tickers",
-        help="Allow manual tickers to bypass the congressional conviction watchlist.",
+        True,
+        "--allow-manual-tickers/--no-allow-manual-tickers",
+        help="Allow manual tickers to trade even when they are not on the congressional watchlist.",
     ),
 ):
     """Run the bot continuously until stopped."""
@@ -1629,6 +1629,92 @@ def run_bot_command(
         raise typer.Exit(2) from exc
     except KeyboardInterrupt:
         console.print("\n[yellow]Bot stopped cleanly.[/yellow]")
+
+
+@app.command("walk-forward")
+def walk_forward_command(
+    ticker: str = typer.Option(
+        ...,
+        "--ticker",
+        help="Ticker to test.",
+    ),
+    start: str = typer.Option(
+        "2020-01-01",
+        "--start",
+        help="Start date in YYYY-MM-DD format.",
+    ),
+    end: str = typer.Option(
+        datetime.date.today().isoformat(),
+        "--end",
+        help="End date in YYYY-MM-DD format.",
+    ),
+    position_pct: float = typer.Option(
+        0.02,
+        "--position-pct",
+        min=0.001,
+        max=0.10,
+        help="Fraction of equity used per entry.",
+    ),
+    min_score: float = typer.Option(
+        2.0,
+        "--min-score",
+        min=1.0,
+        max=4.0,
+        help="Minimum past-data signal score required for entry.",
+    ),
+    stop_loss_pct: float = typer.Option(
+        -0.05,
+        "--stop-loss-pct",
+        min=-0.50,
+        max=-0.001,
+        help="Stop loss as a decimal return.",
+    ),
+    take_profit_pct: float = typer.Option(
+        0.08,
+        "--take-profit-pct",
+        min=0.001,
+        max=1.0,
+        help="Take profit as a decimal return.",
+    ),
+):
+    """Run a no-foresight historical walk-forward simulation."""
+    import yfinance as yf
+
+    from backtests.walk_forward import WalkForwardConfig, run_walk_forward_backtest
+
+    data = yf.download(
+        ticker,
+        start=start,
+        end=end,
+        progress=False,
+        auto_adjust=False,
+        multi_level_index=False,
+    )
+    if data.empty:
+        console.print(f"[red]No data returned for {ticker}.[/red]")
+        raise typer.Exit(1)
+    data = data.reset_index()
+
+    result = run_walk_forward_backtest(
+        data,
+        WalkForwardConfig(
+            position_pct=position_pct,
+            min_score=min_score,
+            stop_loss_pct=stop_loss_pct,
+            take_profit_pct=take_profit_pct,
+        ),
+    )
+
+    table = Table(title=f"Walk-Forward Backtest: {ticker.upper()}", box=box.SIMPLE)
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", justify="right")
+    table.add_row("Total Return", f"{result['total_return_pct']:.2f}%")
+    table.add_row("Max Drawdown", f"{result['max_drawdown_pct']:.2f}%")
+    table.add_row("Sharpe", f"{result['sharpe']:.2f}")
+    table.add_row("Win Rate", f"{result['win_rate_pct']:.2f}%")
+    table.add_row("Trades", str(result["num_trades"]))
+    table.add_row("Final Equity", f"${result['final_equity']:,.2f}")
+    console.print(table)
 
 
 @app.command("replay")

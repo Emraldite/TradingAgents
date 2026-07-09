@@ -56,6 +56,15 @@ def test_int_coercion(monkeypatch):
     assert isinstance(dc.DEFAULT_CONFIG["max_risk_discuss_rounds"], int)
 
 
+def test_scheduler_float_coercion(monkeypatch):
+    dc = _reload_with_env(
+        monkeypatch,
+        TRADINGAGENTS_BUY_POSITION_PCT="0.015",
+    )
+    assert dc.DEFAULT_CONFIG["scheduler_buy_position_pct"] == 0.015
+    assert isinstance(dc.DEFAULT_CONFIG["scheduler_buy_position_pct"], float)
+
+
 @pytest.mark.parametrize(
     "raw,expected",
     [

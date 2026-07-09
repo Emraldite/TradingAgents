@@ -33,6 +33,8 @@ _UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
 CAPITOL_TRADES_URL = "https://www.capitoltrades.com/trades"
 QUIVER_URL = "https://www.quiverquant.com/congresstrading"
+_CAPITOL_TICKER_RE = re.compile(r"^[A-Z][A-Z./-]{0,9}(?::[A-Z]{2})?$")
+_TIME_RE = re.compile(r"^\d{1,2}:\d{2}$")
 
 COMMITTEE_SECTOR_MAP: dict[str, list[str]] = {
     "Armed Services": ["LMT", "RTX", "NOC", "GD", "BA", "LHX", "HII"],
@@ -142,26 +144,38 @@ def _parse_single_amount(s: str) -> float:
 
 def _format_trade_date(text: str) -> str:
     text = text.strip()
-    try:
-        dt = datetime.strptime(text, "%d %b%Y")
-        return dt.strftime("%Y-%m-%d")
-    except (ValueError, TypeError):
-        return text
+    for fmt in ("%d %b%Y", "%d %b %Y", "%Y-%m-%d", "%b %d %Y"):
+        try:
+            dt = datetime.strptime(text, fmt)
+            return dt.strftime("%Y-%m-%d")
+        except (ValueError, TypeError):
+            continue
+    return text
 
 
-def _scrape_capitol_trades() -> list[dict]:
+def _dedupe_records(records: list[dict]) -> list[dict]:
+    deduped: list[dict] = []
+    seen: set[tuple[str, str, str, str, float, str]] = set()
+    for record in records:
+        key = (
+            str(record.get("ticker", "")),
+            str(record.get("politician", "")),
+            str(record.get("trade_type", "")),
+            str(record.get("disclosure_date", "")),
+            float(record.get("amount", 0.0) or 0.0),
+            str(record.get("source", "")),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(record)
+    return deduped
+
+
+def _parse_capitol_trades_from_table(soup: BeautifulSoup) -> list[dict]:
     records = []
-    try:
-        resp = requests.get(CAPITOL_TRADES_URL, headers={"User-Agent": _UA}, timeout=15)
-        resp.raise_for_status()
-    except Exception as exc:
-        logger.warning("Capitol Trades scrape failed: %s", exc)
-        return records
-
-    soup = BeautifulSoup(resp.text, "html.parser")
     rows = soup.select("table tbody tr")
     if not rows:
-        logger.warning("No table rows found on Capitol Trades")
         return records
 
     for row in rows:
@@ -172,7 +186,6 @@ def _scrape_capitol_trades() -> list[dict]:
             politician_raw = cells[0].get_text(strip=True)
             ticker_raw = cells[1].get_text(strip=True).upper()
             trade_date_text = cells[3].get_text(strip=True)
-            relationship = cells[5].get_text(strip=True)
             trade_type = cells[6].get_text(strip=True)
             amount_text = cells[7].get_text(strip=True)
         except (IndexError, AttributeError):
@@ -183,7 +196,6 @@ def _scrape_capitol_trades() -> list[dict]:
             continue
 
         politician = _clean_politician_name(politician_raw)
-
         records.append(
             {
                 "ticker": ticker,
@@ -195,32 +207,89 @@ def _scrape_capitol_trades() -> list[dict]:
                 "committees": POLITICIAN_COMMITTEE_MAP.get(politician, []),
             }
         )
+    return records
 
+
+def _parse_capitol_trades_from_cards(soup: BeautifulSoup) -> list[dict]:
+    records = []
+    tokens = [token.strip() for token in soup.stripped_strings if token.strip()]
+    for i in range(len(tokens) - 13):
+        party_line = tokens[i + 1]
+        ticker_raw = tokens[i + 3].upper()
+        trade_time = tokens[i + 4]
+        if "House" not in party_line and "Senate" not in party_line:
+            continue
+        if not _CAPITOL_TICKER_RE.match(ticker_raw):
+            continue
+        if not _TIME_RE.match(trade_time):
+            continue
+        if tokens[i + 8].lower() != "days":
+            continue
+
+        politician = _clean_politician_name(tokens[i])
+        ticker = _clean_ticker(ticker_raw)
+        trade_type = tokens[i + 11].strip().lower()
+        amount_text = tokens[i + 12]
+        trade_date_text = _format_trade_date(f"{tokens[i + 6]} {tokens[i + 7]}")
+        if not politician or not ticker:
+            continue
+        if trade_type not in {"buy", "sell", "exchange"}:
+            continue
+
+        records.append(
+            {
+                "ticker": ticker,
+                "politician": politician,
+                "trade_type": trade_type,
+                "amount": _parse_capitol_amount(amount_text),
+                "disclosure_date": trade_date_text,
+                "source": "capitol_trades",
+                "committees": POLITICIAN_COMMITTEE_MAP.get(politician, []),
+            }
+        )
+    return records
+
+
+def _parse_capitol_trades_html(html: str) -> list[dict]:
+    soup = BeautifulSoup(html, "html.parser")
+    records = _parse_capitol_trades_from_table(soup)
+    if not records:
+        records = _parse_capitol_trades_from_cards(soup)
+    return _dedupe_records(records)
+
+
+def _scrape_capitol_trades() -> list[dict]:
+    try:
+        resp = requests.get(CAPITOL_TRADES_URL, headers={"User-Agent": _UA}, timeout=15)
+        resp.raise_for_status()
+    except Exception as exc:
+        logger.warning("Capitol Trades scrape failed: %s", exc)
+        return []
+
+    records = _parse_capitol_trades_html(resp.text)
+    if not records:
+        logger.warning("No trade rows found on Capitol Trades")
     logger.info("Scraped %d trades from Capitol Trades", len(records))
     return records
 
 
-def _scrape_quiver() -> list[dict]:
+def _parse_quiver_html(html: str) -> list[dict]:
     records = []
-    try:
-        resp = requests.get(QUIVER_URL, headers={"User-Agent": _UA}, timeout=15)
-        resp.raise_for_status()
-    except Exception as exc:
-        logger.warning("Quiver scrape failed: %s", exc)
-        return records
-
-    soup = BeautifulSoup(resp.text, "html.parser")
+    soup = BeautifulSoup(html, "html.parser")
     table = soup.find("table", id="recentTradesTable")
-    if not table:
-        logger.warning("No trade table found on Quiver (likely JS-rendered)")
+    if table is None:
+        for candidate in soup.find_all("table"):
+            header_text = " ".join(candidate.stripped_strings).lower()
+            if "politician" in header_text and "traded" in header_text:
+                table = candidate
+                break
+    if table is None:
         return records
     rows = table.find("tbody")
     if not rows:
-        logger.info("Quiver tbody is empty; continuing without Quiver rows")
         return records
     rows = rows.find_all("tr")
     if not rows:
-        logger.info("No table rows found on Quiver; continuing with Capitol Trades only")
         return records
 
     for row in rows:
@@ -228,14 +297,16 @@ def _scrape_quiver() -> list[dict]:
         if len(cells) < 5:
             continue
         try:
-            ticker = cells[0].get_text(strip=True).upper()
+            ticker = _clean_ticker(cells[0].get_text(strip=True).upper())
             trade_type = cells[1].get_text(strip=True)
-            politician = cells[2].get_text(strip=True)
-            date_text = cells[4].get_text(strip=True)
-            amount_text = ""
+            politician = _clean_politician_name(cells[2].get_text(strip=True))
+            date_text = _format_trade_date(cells[4].get_text(strip=True))
+            amount_text = cells[5].get_text(strip=True) if len(cells) > 5 else ""
         except (IndexError, AttributeError):
             continue
 
+        if not ticker or not politician:
+            continue
         records.append(
             {
                 "ticker": ticker,
@@ -247,7 +318,20 @@ def _scrape_quiver() -> list[dict]:
                 "committees": POLITICIAN_COMMITTEE_MAP.get(politician, []),
             }
         )
+    return _dedupe_records(records)
 
+
+def _scrape_quiver() -> list[dict]:
+    try:
+        resp = requests.get(QUIVER_URL, headers={"User-Agent": _UA}, timeout=15)
+        resp.raise_for_status()
+    except Exception as exc:
+        logger.warning("Quiver scrape failed: %s", exc)
+        return []
+
+    records = _parse_quiver_html(resp.text)
+    if not records:
+        logger.warning("No trade table found on Quiver (likely layout or JS change)")
     logger.info("Scraped %d trades from Quiver", len(records))
     return records
 

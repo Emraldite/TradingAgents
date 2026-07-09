@@ -79,23 +79,26 @@ def validate_trade(
     open_positions: int,
     daily_volume: float | None,
     rules: SurvivalRules | None = None,
+    max_position_pct: float = MAX_POSITION_PCT,
+    max_open_positions: int = MAX_OPEN_POSITIONS,
+    min_daily_volume: float = MIN_DAILY_VOLUME,
 ) -> tuple[bool, str]:
     if rules and rules.halted_until > time.time():
         return False, "Trading is halted by kill switch"
 
-    if position_size > portfolio_value * MAX_POSITION_PCT:
+    if position_size > portfolio_value * max_position_pct:
         return (
             False,
-            f"Position ${position_size:.0f} exceeds {MAX_POSITION_PCT:.0%} of portfolio (${portfolio_value:.0f})",
+            f"Position ${position_size:.0f} exceeds {max_position_pct:.0%} of portfolio (${portfolio_value:.0f})",
         )
 
-    if open_positions >= MAX_OPEN_POSITIONS:
-        return False, f"Already at max open positions ({MAX_OPEN_POSITIONS})"
+    if open_positions >= max_open_positions:
+        return False, f"Already at max open positions ({max_open_positions})"
 
-    if daily_volume is not None and daily_volume < MIN_DAILY_VOLUME:
+    if daily_volume is not None and daily_volume < min_daily_volume:
         return (
             False,
-            f"Daily volume {daily_volume:.0f} below minimum {MIN_DAILY_VOLUME:,}",
+            f"Daily volume {daily_volume:.0f} below minimum {min_daily_volume:,.0f}",
         )
 
     return True, "Trade validated"

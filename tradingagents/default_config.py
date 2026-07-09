@@ -17,6 +17,11 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_MAX_RISK_ROUNDS":      "max_risk_discuss_rounds",
     "TRADINGAGENTS_CHECKPOINT_ENABLED":   "checkpoint_enabled",
     "TRADINGAGENTS_BENCHMARK_TICKER":     "benchmark_ticker",
+    "TRADINGAGENTS_BUY_POSITION_PCT":     "scheduler_buy_position_pct",
+    "TRADINGAGENTS_OVERWEIGHT_POSITION_PCT": "scheduler_overweight_position_pct",
+    "TRADINGAGENTS_MAX_POSITION_PCT":     "scheduler_max_position_pct",
+    "TRADINGAGENTS_MAX_OPEN_POSITIONS":   "scheduler_max_open_positions",
+    "TRADINGAGENTS_MIN_DAILY_VOLUME":     "scheduler_min_daily_volume",
 }
 
 
@@ -86,6 +91,13 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "congressional_min_conviction_score": 6,
     "committee_alignment_required": True,
     "congressional_cache_hours": 6,
+    # Low-risk scheduler execution defaults. The graph decides direction; these
+    # caps decide how much capital a single AI decision is allowed to touch.
+    "scheduler_buy_position_pct": 0.02,
+    "scheduler_overweight_position_pct": 0.01,
+    "scheduler_max_position_pct": 0.03,
+    "scheduler_max_open_positions": 5,
+    "scheduler_min_daily_volume": 500_000,
     # Search queries used by get_global_news for macro headlines. Extend or
     # replace to broaden geographic / sector coverage.
     "global_news_queries": [

@@ -19,17 +19,20 @@ def test_no_manual_tickers_uses_watchlist():
 
 
 def test_manual_tickers_are_filtered_to_watchlist_by_default():
-    targets, skipped = _select_target_tickers(["aapl", "tsla"], ["AAPL"])
+    targets, skipped = _select_target_tickers(
+        ["aapl", "tsla"],
+        ["AAPL"],
+        allow_manual_tickers=False,
+    )
 
     assert targets == ["AAPL"]
     assert skipped == ["TSLA"]
 
 
-def test_manual_ticker_bypass_requires_explicit_flag():
+def test_manual_ticker_bypass_is_default():
     targets, skipped = _select_target_tickers(
         ["aapl", "tsla"],
         ["MSFT"],
-        allow_manual_tickers=True,
     )
 
     assert targets == ["AAPL", "TSLA"]

@@ -1,6 +1,6 @@
 # TradingAgents Extended
 
-Swing trading research bot built from a fork of TradingAgents. This project adds congressional trading signals, social manipulation checks, portfolio risk controls, backtesting, and Alpaca paper trading.
+Swing trading research bot built from a fork of TradingAgents. This project adds congressional trading signals, social manipulation checks, portfolio risk controls, multi-analyst graph-driven entries, backtesting, and Alpaca paper trading.
 
 This is a personal learning and portfolio project. It is not financial advice, and it should stay in paper trading until the strategy has been validated over time.
 
@@ -8,6 +8,7 @@ This is a personal learning and portfolio project. It is not financial advice, a
 
 - Builds a congressional trade watchlist from Capitol Trades and Quiver pages.
 - Scores tickers by conviction using recency, trade size, source overlap, and committee relevance.
+- Runs the full analyst graph across congressional, market, sentiment, news, and fundamentals before opening new positions.
 - Checks social manipulation risk with StockTwits activity signals.
 - Applies basic survival rules before any order: position sizing, max open positions, volume filters, and kill switch.
 - Sends paper orders to Alpaca through direct REST API calls.
@@ -62,22 +63,28 @@ Dry-run mode is the default and does not write fake trades into the performance 
 uv run python -c "import logging; logging.basicConfig(level=logging.INFO); from tradingagents.scheduler.runner import run_cycle; run_cycle(dry_run=True)"
 ```
 
-Manual tickers do not bypass the congressional watchlist by default. This command only trades `AAPL` if `AAPL` is currently on the conviction watchlist:
+Manual tickers bypass the congressional watchlist by default. This command will trade `AAPL` even if congressional data is empty:
 
 ```powershell
 uv run python -c "import logging; logging.basicConfig(level=logging.INFO); from tradingagents.scheduler.runner import run_cycle; run_cycle(tickers=['AAPL'], dry_run=True)"
 ```
 
-For plumbing tests only, explicitly allow a manual ticker override:
+If you want the old congressional-only gate, explicitly turn the override off:
 
 ```powershell
-uv run python -c "import logging; logging.basicConfig(level=logging.INFO); from tradingagents.scheduler.runner import run_cycle; run_cycle(tickers=['AAPL'], dry_run=True, allow_manual_tickers=True)"
+uv run python -c "import logging; logging.basicConfig(level=logging.INFO); from tradingagents.scheduler.runner import run_cycle; run_cycle(tickers=['AAPL'], dry_run=True, allow_manual_tickers=False)"
 ```
 
 Place real paper orders only after dry-run behavior looks sane:
 
 ```powershell
 uv run python -c "import logging; logging.basicConfig(level=logging.INFO); from tradingagents.scheduler.runner import run_cycle; run_cycle(dry_run=False)"
+```
+
+Run a no-foresight historical simulation before trusting a signal live:
+
+```powershell
+uv run tradingagents walk-forward --ticker AAPL --start 2020-01-01 --end 2025-01-01 --position-pct 0.02
 ```
 
 ## CLI Analysis
@@ -97,7 +104,9 @@ uv run tradingagents analyze --checkpoint
 ## Current Safety Defaults
 
 - Scheduler defaults to `dry_run=True`.
-- Manual tickers are filtered against the congressional conviction watchlist unless `allow_manual_tickers=True`.
+- Manual tickers are allowed by default; set `allow_manual_tickers=False` if you want congressional-only gating.
+- New entries require a graph rating of `Buy` or `Overweight`; `Hold`, `Underweight`, and `Sell` are skipped.
+- Position sizing is intentionally low-risk by default: `Buy` = 2%, `Overweight` = 1%, max single position = 3%.
 - Alpaca uses the paper endpoint from `ALPACA_BASE_URL`.
 - Dry-runs log simulated counts but do not create fake trade entries.
 - Real paper orders are tracked after Alpaca accepts the order.

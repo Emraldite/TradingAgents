@@ -11,6 +11,7 @@ from tradingagents.alerts import AlertManager
 from tradingagents.dataflows.congressional_data import get_conviction_watchlist
 from tradingagents.dataflows.manipulation_detector import detect_manipulation
 from tradingagents.execution.alpaca_executor import AlpacaExecutor
+from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.risk.survival_rules import SurvivalRules, validate_trade
 from tradingagents.risk.performance_tracker import PerformanceTracker
 from tradingagents.state_store import StrategyStateStore
@@ -37,6 +38,8 @@ MANIPULATION_SELL_THRESHOLD = 0.85
 LIMIT_SLIPPAGE_BPS = 20
 SHADOW_SLIPPAGE_BPS = 10
 MAX_UNIVERSE_SIZE = 20
+GRAPH_ANALYSTS = ["congressional", "market", "social", "news", "fundamentals"]
+GRAPH_BUY_RATINGS = {"Buy", "Overweight"}
 
 TECHNICAL_SCREEN_TICKERS = [
     "AAPL",
@@ -455,7 +458,7 @@ def _normalize_tickers(tickers: list[str]) -> list[str]:
 def _select_target_tickers(
     requested_tickers: list[str] | None,
     watchlist_tickers: list[str],
-    allow_manual_tickers: bool = False,
+    allow_manual_tickers: bool = True,
 ) -> tuple[list[str], list[str]]:
     watchlist_tickers = _normalize_tickers(watchlist_tickers)
     if not requested_tickers:
@@ -481,12 +484,48 @@ def _resolve_mode(mode: str | None, dry_run: bool) -> ExecutionMode:
     return normalized  # type: ignore[return-value]
 
 
+def _create_analysis_graph() -> TradingAgentsGraph:
+    config = dict(DEFAULT_CONFIG)
+    # Scheduler runs are one-shot per ticker, so checkpoint resumes add state
+    # complexity without much benefit here.
+    config["checkpoint_enabled"] = False
+    return TradingAgentsGraph(
+        GRAPH_ANALYSTS,
+        config=config,
+        debug=False,
+    )
+
+
+def _run_graph_analysis(
+    graph: TradingAgentsGraph,
+    ticker: str,
+    trade_date: str,
+) -> tuple[str, dict]:
+    final_state, rating = graph.propagate(ticker, trade_date)
+    return rating, {
+        "market_report": final_state.get("market_report", ""),
+        "congressional_report": final_state.get("congressional_report", ""),
+        "sentiment_report": final_state.get("sentiment_report", ""),
+        "news_report": final_state.get("news_report", ""),
+        "fundamentals_report": final_state.get("fundamentals_report", ""),
+        "final_trade_decision": final_state.get("final_trade_decision", ""),
+    }
+
+
+def _position_pct_for_rating(rating: str) -> float:
+    if rating == "Buy":
+        return float(DEFAULT_CONFIG.get("scheduler_buy_position_pct", 0.02))
+    if rating == "Overweight":
+        return float(DEFAULT_CONFIG.get("scheduler_overweight_position_pct", 0.01))
+    return 0.0
+
+
 def run_cycle(
     tickers: list[str] | None = None,
     min_conviction: int = 6,
     lookback_days: int = 45,
     dry_run: bool = True,
-    allow_manual_tickers: bool = False,
+    allow_manual_tickers: bool = True,
     mode: str | None = None,
 ):
     cycle_start = time.time()
@@ -541,6 +580,7 @@ def run_cycle(
     signals_fired = 0
     trades_executed = 0
     simulated_trades = 0
+    graph = _create_analysis_graph()
 
     if execution_mode != "dry-run":
         cycle_id = state_store.start_cycle(execution_mode, target_tickers)
@@ -654,15 +694,44 @@ def run_cycle(
             break
 
         open_positions = len(broker_portfolio) if execution_mode != "dry-run" else len(executor.get_portfolio())
+        trade_date = datetime.now().strftime("%Y-%m-%d")
+        try:
+            rating, analysis = _run_graph_analysis(graph, ticker, trade_date)
+        except Exception as exc:
+            logger.warning("Trading graph failed for %s: %s", ticker, exc)
+            decisions.append(
+                {
+                    "ticker": ticker,
+                    "decision": "skip",
+                    "reason": f"graph: {exc}",
+                }
+            )
+            continue
+
+        if rating not in GRAPH_BUY_RATINGS:
+            decisions.append(
+                {
+                    "ticker": ticker,
+                    "decision": "skip",
+                    "reason": f"graph_rating={rating}",
+                    "rating": rating,
+                    "final_trade_decision": analysis["final_trade_decision"],
+                }
+            )
+            continue
+
         signals_fired += 1
 
-        position_size = portfolio_value * 0.05
+        position_size = portfolio_value * _position_pct_for_rating(rating)
         valid, msg = validate_trade(
             ticker=ticker,
             position_size=position_size,
             portfolio_value=portfolio_value,
             open_positions=open_positions,
             daily_volume=daily_volume,
+            max_position_pct=float(DEFAULT_CONFIG.get("scheduler_max_position_pct", 0.03)),
+            max_open_positions=int(DEFAULT_CONFIG.get("scheduler_max_open_positions", 5)),
+            min_daily_volume=float(DEFAULT_CONFIG.get("scheduler_min_daily_volume", 500_000)),
         )
 
         if not valid:
@@ -672,8 +741,9 @@ def run_cycle(
 
         if execution_mode == "dry-run":
             logger.info(
-                "DRY RUN buy signal for %s: $%.2f at %.2f",
+                "DRY RUN buy signal for %s: %s, $%.2f at %.2f",
                 ticker,
+                rating,
                 position_size,
                 close,
             )
@@ -685,13 +755,16 @@ def run_cycle(
                     "mode": execution_mode,
                     "notional": position_size,
                     "price": close,
+                    "rating": rating,
+                    "final_trade_decision": analysis["final_trade_decision"],
                 }
             )
             continue
         if execution_mode == "shadow":
             logger.info(
-                "SHADOW buy signal for %s: $%.2f at %.2f",
+                "SHADOW buy signal for %s: %s, $%.2f at %.2f",
                 ticker,
+                rating,
                 position_size,
                 close,
             )
@@ -709,6 +782,8 @@ def run_cycle(
                     "decision": "shadow-buy",
                     "notional": position_size,
                     "price": _shadow_fill_price("buy", close),
+                    "rating": rating,
+                    "final_trade_decision": analysis["final_trade_decision"],
                 }
             )
             continue
@@ -764,6 +839,8 @@ def run_cycle(
                     "decision": "live-buy-submitted",
                     "order_id": order.get("order_id"),
                     "status": order.get("status"),
+                    "rating": rating,
+                    "final_trade_decision": analysis["final_trade_decision"],
                 }
             )
         else:
@@ -833,7 +910,7 @@ def start_scheduler(
     dry_run: bool = True,
     mode: str | None = None,
     tickers: list[str] | None = None,
-    allow_manual_tickers: bool = False,
+    allow_manual_tickers: bool = True,
 ):
     try:
         import schedule
