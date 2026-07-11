@@ -26,6 +26,12 @@ class TestGoogleApiKeyStandardization(unittest.TestCase):
                 call_kwargs = mock_chat.call_args[1]
                 self.assertEqual(call_kwargs.get("google_api_key"), expected_key)
 
+    @patch("tradingagents.llm_clients.google_client.NormalizedChatGoogleGenerativeAI")
+    def test_gemini_35_uses_thinking_level(self, mock_chat):
+        GoogleClient("gemini-3.5-flash", thinking_level="high").get_llm()
+
+        self.assertEqual(mock_chat.call_args[1]["thinking_level"], "high")
+
 
 if __name__ == "__main__":
     unittest.main()

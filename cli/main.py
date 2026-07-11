@@ -1802,6 +1802,7 @@ def run_cycle_command(
     table.add_row("Orders Submitted", str(summary.get("submitted", 0)))
     table.add_row("Confirmed Fill Events", str(summary.get("executed", 0)))
     table.add_row("Simulated", str(summary.get("simulated", 0)))
+    table.add_row("Analysis Failures", str(summary.get("analysis_failures", 0)))
     if summary.get("reason"):
         table.add_row("Reason", str(summary["reason"]))
     console.print(table)

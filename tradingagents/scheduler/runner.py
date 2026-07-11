@@ -57,6 +57,14 @@ MAX_UNIVERSE_SIZE = 20
 GRAPH_ANALYSTS = ["congressional", "market", "social", "news", "fundamentals"]
 GRAPH_BUY_RATINGS = {"Buy", "Overweight"}
 STRATEGY_RULES = strategy_rules_from_config(DEFAULT_CONFIG)
+APPROVED_FREE_GOOGLE_MODELS = frozenset(
+    {
+        "gemini-3.5-flash",
+        "gemini-3.1-flash-lite",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+    }
+)
 
 TECHNICAL_SCREEN_TICKERS = [
     "AAPL",
@@ -104,6 +112,30 @@ LEVERAGED_ETFS = {
     "LABU",
     "LABD",
 }
+
+
+def _validate_free_llm_config() -> str | None:
+    """Reject paid or unknown hosted models in autonomous scheduler cycles."""
+    provider = str(DEFAULT_CONFIG.get("llm_provider", "")).strip().lower()
+    if provider == "ollama":
+        return None
+    if provider != "google":
+        return (
+            "Automated cycles require a zero-cost supported LLM provider "
+            "(google or ollama)"
+        )
+
+    configured_models = {
+        str(DEFAULT_CONFIG.get("quick_think_llm", "")).strip().lower(),
+        str(DEFAULT_CONFIG.get("deep_think_llm", "")).strip().lower(),
+    }
+    rejected = sorted(configured_models - APPROVED_FREE_GOOGLE_MODELS)
+    if rejected:
+        return (
+            "Free-only mode rejected unapproved Google model(s): "
+            f"{', '.join(rejected)}"
+        )
+    return None
 
 
 def _latest_scalar(data, column: str) -> float | None:
@@ -801,6 +833,23 @@ def run_cycle(
         execution_mode,
     )
 
+    llm_config_error = _validate_free_llm_config()
+    if llm_config_error:
+        state_store.record_health_event(
+            "critical",
+            "llm_config",
+            llm_config_error,
+        )
+        return {
+            "mode": execution_mode,
+            "status": "failed",
+            "reason": llm_config_error,
+            "submitted": 0,
+            "executed": 0,
+            "simulated": 0,
+            "decisions": [],
+        }
+
     if execution_mode != "dry-run":
         market_open, clock, clock_error = executor.require_market_open()
         if not market_open:
@@ -846,6 +895,8 @@ def run_cycle(
     orders_submitted = 0
     confirmed_fills = 0
     simulated_trades = 0
+    graph_successes = 0
+    graph_failures = 0
     graph = _create_analysis_graph()
     scorecard = _create_scorecard()
     scorecard_strategy_key = _scorecard_strategy_key()
@@ -1101,15 +1152,26 @@ def run_cycle(
         try:
             rating, analysis = _run_graph_analysis(graph, ticker, trade_date)
         except Exception as exc:
-            logger.warning("Trading graph failed for %s: %s", ticker, exc)
+            graph_failures += 1
+            error_text = str(exc)
+            if len(error_text) > 500:
+                error_text = error_text[:497] + "..."
+            logger.warning("Trading graph failed for %s: %s", ticker, error_text)
+            state_store.record_health_event(
+                "error",
+                "llm_graph",
+                "Trading graph analysis failed",
+                {"ticker": ticker, "error": error_text},
+            )
             decisions.append(
                 {
                     "ticker": ticker,
                     "decision": "skip",
-                    "reason": f"graph: {exc}",
+                    "reason": f"graph: {error_text}",
                 }
             )
             continue
+        graph_successes += 1
 
         try:
             scorecard.record_decision(
@@ -1339,6 +1401,19 @@ def run_cycle(
 
     cycle_status = "complete"
     cycle_error = None
+    if graph_failures:
+        if graph_successes == 0:
+            cycle_status = "failed"
+            cycle_error = (
+                f"All {graph_failures} attempted graph analyses failed; "
+                "check LLM model access and quota"
+            )
+        else:
+            cycle_status = "degraded"
+            cycle_error = (
+                f"{graph_failures} graph analyses failed and "
+                f"{graph_successes} completed"
+            )
     if execution_mode in {"paper", "real"}:
         _ensure_native_stop_orders(decisions, execution_mode)
         final_unprotected = state_store.positions_needing_stop_orders()
@@ -1385,6 +1460,7 @@ def run_cycle(
         "submitted": orders_submitted,
         "executed": confirmed_fills,
         "simulated": simulated_trades,
+        "analysis_failures": graph_failures,
         "reason": cycle_error,
         "decisions": decisions,
     }

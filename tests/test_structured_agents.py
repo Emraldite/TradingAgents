@@ -21,6 +21,7 @@ from tradingagents.agents.schemas import (
     render_trader_proposal,
 )
 from tradingagents.agents.trader.trader import create_trader
+from tradingagents.agents.utils.structured import invoke_structured_or_freetext
 
 
 # ---------------------------------------------------------------------------
@@ -230,3 +231,55 @@ class TestResearchManagerAgent:
         rm = create_research_manager(llm)
         result = rm(_make_rm_state())
         assert result["investment_plan"] == plain_response
+
+
+def test_quota_failure_does_not_waste_a_second_model_request():
+    structured = MagicMock()
+    structured.invoke.side_effect = RuntimeError("429 RESOURCE_EXHAUSTED: quota exceeded")
+    plain = MagicMock()
+
+    with pytest.raises(RuntimeError, match="RESOURCE_EXHAUSTED"):
+        invoke_structured_or_freetext(
+            structured,
+            plain,
+            "prompt",
+            lambda result: str(result),
+            "Test Agent",
+        )
+
+    plain.invoke.assert_not_called()
+
+
+def test_authentication_failure_does_not_waste_a_second_model_request():
+    structured = MagicMock()
+    structured.invoke.side_effect = RuntimeError("401 UNAUTHENTICATED: invalid API key")
+    plain = MagicMock()
+
+    with pytest.raises(RuntimeError, match="UNAUTHENTICATED"):
+        invoke_structured_or_freetext(
+            structured,
+            plain,
+            "prompt",
+            lambda result: str(result),
+            "Test Agent",
+        )
+
+    plain.invoke.assert_not_called()
+
+
+def test_malformed_structured_response_still_uses_freetext_fallback():
+    structured = MagicMock()
+    structured.invoke.side_effect = ValueError("malformed structured response")
+    plain = MagicMock()
+    plain.invoke.return_value = MagicMock(content="fallback")
+
+    result = invoke_structured_or_freetext(
+        structured,
+        plain,
+        "prompt",
+        lambda value: str(value),
+        "Test Agent",
+    )
+
+    assert result == "fallback"
+    plain.invoke.assert_called_once_with("prompt")

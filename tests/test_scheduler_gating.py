@@ -14,6 +14,7 @@ from tradingagents.scheduler.runner import (
     _shadow_fill_price,
     _trading_days_between,
     _validate_broker_mode,
+    _validate_free_llm_config,
 )
 
 
@@ -209,6 +210,37 @@ def test_real_mode_accepts_matching_approved_release_report(monkeypatch, tmp_pat
 def test_resolve_mode_rejects_unknown_mode():
     with pytest.raises(ValueError):
         _resolve_mode("margin", True)
+
+
+def test_free_llm_guard_accepts_configured_gemini_models(monkeypatch):
+    from tradingagents.scheduler import runner
+
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "llm_provider", "google")
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "quick_think_llm", "gemini-3.1-flash-lite")
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "deep_think_llm", "gemini-3.5-flash")
+
+    assert _validate_free_llm_config() is None
+
+
+def test_free_llm_guard_rejects_paid_google_model(monkeypatch):
+    from tradingagents.scheduler import runner
+
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "llm_provider", "google")
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "quick_think_llm", "gemini-3.1-flash-lite")
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "deep_think_llm", "gemini-3.1-pro-preview")
+
+    error = _validate_free_llm_config()
+
+    assert "Free-only mode rejected" in error
+    assert "gemini-3.1-pro-preview" in error
+
+
+def test_free_llm_guard_rejects_paid_provider(monkeypatch):
+    from tradingagents.scheduler import runner
+
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "llm_provider", "openai")
+
+    assert "zero-cost supported" in _validate_free_llm_config()
 
 
 def test_exit_reason_prefers_stop_loss_before_other_triggers():

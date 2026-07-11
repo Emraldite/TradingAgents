@@ -10,7 +10,7 @@ strategy. Keep it in paper mode until every machine-checked release gate passes.
 
 ## Free-first stack
 
-- Gemini's free API tier or a local Ollama model for AI analysis
+- Gemini's free API tier: 3.5 Flash for deep analysis and 3.1 Flash-Lite for routine work
 - yfinance and public web sources for delayed/research data
 - Alpaca's free paper-trading account for execution testing
 - SQLite for the local order, fill, risk, health, and performance ledger
@@ -53,7 +53,12 @@ Fill in `GOOGLE_API_KEY`, `ALPACA_API_KEY`, and `ALPACA_SECRET_KEY`. Leave
 their defaults. Never commit `.env`.
 
 To guarantee no model bill, use a Gemini project that has no billing account
-attached and stay within its free quota, or use Ollama locally. Free Alpaca market
+attached and stay within its free quota, or use Ollama locally. The scheduler
+rejects paid or unknown hosted models before collecting data or creating orders.
+It never changes models automatically after a quota error. If 3.5 Flash has no
+free quota, manually set both model variables to `gemini-3.1-flash-lite`; the
+strategy identifier changes so results from different model pairs stay separate.
+Free Alpaca market
 data is [real-time IEX-only](https://docs.alpaca.markets/docs/about-market-data-api),
 so the bot rejects stale or unusually wide IEX quotes;
 it does not pretend that this free feed has full-market SIP coverage.

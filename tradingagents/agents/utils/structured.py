@@ -28,6 +28,22 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
 
 
+def _provider_request_cannot_succeed(exc: Exception) -> bool:
+    """Return true when a second formatting attempt would waste another request."""
+    message = str(exc).upper()
+    return any(
+        marker in message
+        for marker in (
+            "RESOURCE_EXHAUSTED",
+            "RATE_LIMIT",
+            "RATE LIMIT",
+            "QUOTA EXCEEDED",
+            "PERMISSION_DENIED",
+            "UNAUTHENTICATED",
+        )
+    )
+
+
 def bind_structured(llm: Any, schema: type[T], agent_name: str) -> Optional[Any]:
     """Return ``llm.with_structured_output(schema)`` or ``None`` if unsupported.
 
@@ -64,6 +80,13 @@ def invoke_structured_or_freetext(
             result = structured_llm.invoke(prompt)
             return render(result)
         except Exception as exc:
+            if _provider_request_cannot_succeed(exc):
+                logger.error(
+                    "%s: provider request failed; skipping free-text retry: %s",
+                    agent_name,
+                    exc,
+                )
+                raise
             logger.warning(
                 "%s: structured-output invocation failed (%s); retrying once as free text",
                 agent_name, exc,

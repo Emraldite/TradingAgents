@@ -21,8 +21,8 @@ def _reload_with_env(monkeypatch, **overrides):
 def test_no_env_uses_built_in_defaults(monkeypatch):
     dc = _reload_with_env(monkeypatch)
     assert dc.DEFAULT_CONFIG["llm_provider"] == "google"
-    assert dc.DEFAULT_CONFIG["deep_think_llm"] == "gemini-2.5-pro"
-    assert dc.DEFAULT_CONFIG["quick_think_llm"] == "gemini-2.5-flash"
+    assert dc.DEFAULT_CONFIG["deep_think_llm"] == "gemini-3.5-flash"
+    assert dc.DEFAULT_CONFIG["quick_think_llm"] == "gemini-3.1-flash-lite"
     assert dc.DEFAULT_CONFIG["backend_url"] is None
     assert dc.DEFAULT_CONFIG["max_debate_rounds"] == 1
     assert dc.DEFAULT_CONFIG["checkpoint_enabled"] is False

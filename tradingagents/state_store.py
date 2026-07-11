@@ -884,7 +884,7 @@ class StrategyStateStore:
                 """SELECT COUNT(*) AS total,
                           MIN(started_at) AS first_started,
                           MAX(COALESCE(completed_at, started_at)) AS last_completed,
-                          SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
+                          SUM(CASE WHEN status IN ('failed', 'degraded') THEN 1 ELSE 0 END) AS failed,
                           SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS unresolved
                    FROM strategy_cycles WHERE mode IN ('paper', 'live')"""
             ).fetchone()

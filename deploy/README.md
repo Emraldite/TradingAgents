@@ -50,6 +50,18 @@ TRADINGAGENTS_ALLOW_REAL_MONEY=false
 TRADINGAGENTS_MAX_REAL_MONEY_NOTIONAL=0
 ```
 
+The checked-in free model pair is:
+
+```dotenv
+TRADINGAGENTS_DEEP_THINK_LLM=gemini-3.5-flash
+TRADINGAGENTS_QUICK_THINK_LLM=gemini-3.1-flash-lite
+```
+
+The scheduler rejects paid or unknown hosted models and never switches models
+after a quota error. If 3.5 Flash has no free quota, stop the service and manually
+set both variables to `gemini-3.1-flash-lite`. This starts a distinct strategy
+history; do not mix its evidence with the 3.5 Flash configuration.
+
 Never copy your local `.env` into GitHub. Transfer its values privately or create
 the VM file manually.
 
@@ -65,8 +77,10 @@ uv run tradingagents run-cycle --mode dry-run --tickers AAPL,MSFT,NVDA
 uv run tradingagents health
 ```
 
-Do not continue if the broker status points at a real-money endpoint or the dry
-run reports configuration/data errors.
+Do not continue if the broker status points at a real-money endpoint, either
+configured Gemini model has zero active free quota, or the dry run reports
+configuration/data errors. Leave billing disabled; quota exhaustion should stop
+the bot rather than create a charge.
 
 ## 5. Install the paper-only service
 
