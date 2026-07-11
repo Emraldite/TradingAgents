@@ -14,7 +14,7 @@ _API = "https://api.stocktwits.com/api/2/streams/symbol/{ticker}.json"
 _UA = "tradingagents-extended/0.1"
 
 
-def fetch_stream(ticker: str, limit: int = 30) -> list[dict]:
+def fetch_stream_checked(ticker: str, limit: int = 30) -> tuple[list[dict], str | None]:
     url = _API.format(ticker=ticker.upper())
     req = Request(url, headers={"User-Agent": _UA, "Accept": "application/json"})
     try:
@@ -22,8 +22,13 @@ def fetch_stream(ticker: str, limit: int = 30) -> list[dict]:
             data = json.loads(resp.read())
     except (HTTPError, URLError, json.JSONDecodeError, TimeoutError) as exc:
         logger.warning("StockTwits fetch failed for %s: %s", ticker, exc)
-        return []
-    return (data.get("messages", []) if isinstance(data, dict) else [])[:limit]
+        return [], str(exc)
+    return (data.get("messages", []) if isinstance(data, dict) else [])[:limit], None
+
+
+def fetch_stream(ticker: str, limit: int = 30) -> list[dict]:
+    messages, _ = fetch_stream_checked(ticker, limit=limit)
+    return messages
 
 
 def parse_sentiment(messages: list[dict]) -> dict[str, Any]:
@@ -83,10 +88,12 @@ def calculate_velocity(timestamps: list[float], window_hours: int = 6) -> float:
 
 
 def get_ticker_sentiment(ticker: str) -> dict[str, Any]:
-    messages = fetch_stream(ticker, limit=30)
+    messages, error = fetch_stream_checked(ticker, limit=30)
     if not messages:
         return {
             "ticker": ticker,
+            "status": "unavailable" if error else "available",
+            "error": error,
             "total_messages": 0,
             "bullish_ratio": 0,
             "bearish_ratio": 0,
@@ -97,4 +104,6 @@ def get_ticker_sentiment(ticker: str) -> dict[str, Any]:
     velocity = calculate_velocity(parsed["timestamps"])
     parsed["velocity"] = round(velocity, 2)
     parsed["ticker"] = ticker
+    parsed["status"] = "available"
+    parsed["error"] = None
     return parsed

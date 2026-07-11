@@ -223,6 +223,15 @@ __marimo__/
 .uv-cache/
 uv-cache/
 
+# Local editor/agent state
+.vscode/
+.idea/
+.claude/
+.codex/
+.agents/
+.DS_Store
+Thumbs.db
+
 # Project-specific: local SQLite databases (API caches, strategy state, performance tracking)
 data/*.db
 data/*.sqlite
@@ -231,6 +240,10 @@ data/*-journal
 data/*.db-journal
 data/*.db-shm
 data/*.db-wal
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
 
@@ -241,16 +254,24 @@ backtests/results/
 reports/
 results/
 runs/
+real_money_validation.json
+backtest_validation.json
+trading_memory.md
 
 # Logs and VM/background-run output
 logs/
+backups/
 *.out
 nohup.out
 *.pid
 *.log.*
+docker-compose.override.yml
 
-# Legacy accidental agent-memory folder. The active project memory folder is .AGENT/.
-.AGENTS/
+# Credentials and private keys. Public examples remain explicitly allowed above.
+*.pem
+*.key
+id_rsa
+id_ed25519
 
-# uv python pin
-.python-version
+# Local Codex project memory; keep personal context out of the public repository.
+.AGENT/

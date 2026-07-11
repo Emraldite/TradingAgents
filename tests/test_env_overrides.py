@@ -20,9 +20,9 @@ def _reload_with_env(monkeypatch, **overrides):
 
 def test_no_env_uses_built_in_defaults(monkeypatch):
     dc = _reload_with_env(monkeypatch)
-    assert dc.DEFAULT_CONFIG["llm_provider"] == "openai"
-    assert dc.DEFAULT_CONFIG["deep_think_llm"] == "gpt-5.4"
-    assert dc.DEFAULT_CONFIG["quick_think_llm"] == "gpt-5.4-mini"
+    assert dc.DEFAULT_CONFIG["llm_provider"] == "google"
+    assert dc.DEFAULT_CONFIG["deep_think_llm"] == "gemini-2.5-pro"
+    assert dc.DEFAULT_CONFIG["quick_think_llm"] == "gemini-2.5-flash"
     assert dc.DEFAULT_CONFIG["backend_url"] is None
     assert dc.DEFAULT_CONFIG["max_debate_rounds"] == 1
     assert dc.DEFAULT_CONFIG["checkpoint_enabled"] is False
@@ -60,9 +60,28 @@ def test_scheduler_float_coercion(monkeypatch):
     dc = _reload_with_env(
         monkeypatch,
         TRADINGAGENTS_BUY_POSITION_PCT="0.015",
+        TRADINGAGENTS_SCORECARD_WARMUP_POSITION_PCT="0.004",
+        TRADINGAGENTS_STOP_LOSS_PCT="-0.04",
+        TRADINGAGENTS_MAX_HOLD_TRADING_DAYS="7",
     )
     assert dc.DEFAULT_CONFIG["scheduler_buy_position_pct"] == 0.015
     assert isinstance(dc.DEFAULT_CONFIG["scheduler_buy_position_pct"], float)
+    assert dc.DEFAULT_CONFIG["scorecard_warmup_position_pct"] == 0.004
+    assert isinstance(dc.DEFAULT_CONFIG["scorecard_warmup_position_pct"], float)
+    assert dc.DEFAULT_CONFIG["stop_loss_pct"] == -0.04
+    assert dc.DEFAULT_CONFIG["max_hold_trading_days"] == 7
+
+
+def test_data_collection_overrides(monkeypatch):
+    dc = _reload_with_env(
+        monkeypatch,
+        TRADINGAGENTS_NEWS_ARTICLE_LIMIT="12",
+        TRADINGAGENTS_CONGRESSIONAL_LOOKBACK_DAYS="30",
+        TRADINGAGENTS_CONGRESSIONAL_CACHE_HOURS="2",
+    )
+    assert dc.DEFAULT_CONFIG["news_article_limit"] == 12
+    assert dc.DEFAULT_CONFIG["congressional_lookback_days"] == 30
+    assert dc.DEFAULT_CONFIG["congressional_cache_hours"] == 2
 
 
 @pytest.mark.parametrize(
@@ -84,7 +103,7 @@ def test_empty_env_value_is_passthrough(monkeypatch):
         TRADINGAGENTS_LLM_PROVIDER="",
         TRADINGAGENTS_MAX_DEBATE_ROUNDS="",
     )
-    assert dc.DEFAULT_CONFIG["llm_provider"] == "openai"
+    assert dc.DEFAULT_CONFIG["llm_provider"] == "google"
     assert dc.DEFAULT_CONFIG["max_debate_rounds"] == 1
 
 

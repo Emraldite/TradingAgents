@@ -3,33 +3,14 @@ services:
     build: .
     env_file:
       - .env
-    volumes:
-      - tradingagents_data:/home/appuser/.tradingagents
-    tty: true
-    stdin_open: true
-
-  ollama:
-    image: ollama/ollama:latest
-    volumes:
-      - ollama_data:/root/.ollama
-    profiles:
-      - ollama
-
-  tradingagents-ollama:
-    build: .
-    env_file:
-      - .env
     environment:
-      - LLM_PROVIDER=ollama
+      TRADINGAGENTS_CACHE_DIR: /home/appuser/.tradingagents/cache
+      TRADINGAGENTS_RESULTS_DIR: /home/appuser/.tradingagents/logs
+      TRADINGAGENTS_MEMORY_LOG_PATH: /home/appuser/.tradingagents/memory/trading_memory.md
     volumes:
       - tradingagents_data:/home/appuser/.tradingagents
-    depends_on:
-      - ollama
-    tty: true
-    stdin_open: true
-    profiles:
-      - ollama
+    command: ["run-cycle", "--mode", "dry-run", "--tickers", "AAPL,MSFT,NVDA"]
+    init: true
 
 volumes:
   tradingagents_data:
-  ollama_data:

@@ -1,9 +1,11 @@
 from typing import Optional
 import datetime
+import logging
 import typer
 import questionary
 from pathlib import Path
 from functools import wraps
+from logging.handlers import RotatingFileHandler
 from rich.console import Console
 from rich.panel import Panel
 from rich.spinner import Spinner
@@ -32,6 +34,29 @@ app = typer.Typer(
     add_completion=True,  # Enable shell completion
     pretty_exceptions_show_locals=False,
 )
+
+
+def _configure_bot_logging(log_file: Path) -> Path:
+    resolved = log_file.expanduser().resolve()
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    formatter = logging.Formatter(
+        "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+    )
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    file_handler = RotatingFileHandler(
+        resolved,
+        maxBytes=5_000_000,
+        backupCount=3,
+        encoding="utf-8",
+    )
+    file_handler.setFormatter(formatter)
+    logging.basicConfig(
+        level=logging.INFO,
+        handlers=[console_handler, file_handler],
+        force=True,
+    )
+    return resolved
 
 
 # Create a deque to store recent messages with a maximum length
@@ -1526,12 +1551,197 @@ def strategy_status(
     console.print(trades_table)
 
 
+@app.command("scorecard")
+def scorecard_command(
+    resolve: bool = typer.Option(
+        False,
+        "--resolve",
+        help="Try to resolve due outcomes from yfinance before printing.",
+    ),
+):
+    """Show AI decision scorecard performance and allowed position size."""
+    from pathlib import Path
+
+    from tradingagents.default_config import DEFAULT_CONFIG
+    from tradingagents.risk.scorecard import Scorecard
+
+    scorecard = Scorecard(
+        Path(DEFAULT_CONFIG.get("data_cache_dir", "data")) / "scorecard.db",
+        horizon_days=int(DEFAULT_CONFIG.get("scorecard_horizon_days", 10)),
+        stop_loss_pct=float(DEFAULT_CONFIG.get("scorecard_stop_loss_pct", -0.05)),
+        warmup_position_pct=float(DEFAULT_CONFIG.get("scorecard_warmup_position_pct", 0.005)),
+        tier1_position_pct=float(DEFAULT_CONFIG.get("scorecard_tier1_position_pct", 0.01)),
+        tier2_position_pct=float(DEFAULT_CONFIG.get("scorecard_tier2_position_pct", 0.02)),
+        min_resolved_decisions=int(DEFAULT_CONFIG.get("scorecard_min_resolved_decisions", 30)),
+        tier2_min_decisions=int(DEFAULT_CONFIG.get("scorecard_tier2_min_decisions", 60)),
+        benchmark_ticker=DEFAULT_CONFIG.get("benchmark_ticker") or "SPY",
+    )
+    if resolve:
+        resolved = scorecard.resolve_due_outcomes()
+        console.print(f"[green]Resolved {resolved} due scorecard outcome(s).[/green]")
+
+    strategy_key = (
+        f"full_graph:{DEFAULT_CONFIG.get('strategy_version', 'unknown')}:"
+        f"{DEFAULT_CONFIG.get('llm_provider', 'unknown')}:"
+        f"{DEFAULT_CONFIG.get('quick_think_llm', 'unknown')}:"
+        f"{DEFAULT_CONFIG.get('deep_think_llm', 'unknown')}"
+    )
+    rows = scorecard.summaries()
+    if not rows:
+        rows = [scorecard.strategy_summary(strategy_key)]
+
+    table = Table(title="AI Decision Scorecard", box=box.SIMPLE)
+    table.add_column("Strategy", style="cyan")
+    table.add_column("Decisions", justify="right")
+    table.add_column("Pending", justify="right")
+    table.add_column("Win Rate", justify="right")
+    table.add_column("Avg Alpha", justify="right")
+    table.add_column("Max DD", justify="right")
+    table.add_column("Allowed Size", justify="right")
+    table.add_column("Status")
+    for row in rows:
+        gate = scorecard.gate_for_strategy(str(row["strategy_key"]))
+        table.add_row(
+            str(row["strategy_key"]),
+            str(row["resolved_decisions"]),
+            str(row["pending_decisions"]),
+            f"{float(row['win_rate_pct']):.1f}%",
+            f"{float(row['avg_alpha_pct']):+.2f}%",
+            f"{float(row['max_drawdown_pct']):.2f}%",
+            f"{gate.allowed_position_pct:.2%}",
+            gate.status,
+        )
+    console.print(table)
+
+
+@app.command("health")
+def health_command():
+    """Show autonomous-trader reconciliation, protection, risk, and performance health."""
+    from tradingagents.state_store import StrategyStateStore
+
+    store = StrategyStateStore(DEFAULT_CONFIG.get("data_cache_dir", "data") + "/strategy_state.db")
+    health = store.health_snapshot()
+    table = Table(title="Autonomous Trader Health", box=box.SIMPLE)
+    table.add_column("Check", style="cyan")
+    table.add_column("Value")
+    last_cycle = health.get("last_cycle") or {}
+    risk = health.get("risk") or {}
+    performance = health.get("performance") or {}
+    table.add_row("Last Cycle", str(last_cycle.get("completed_at") or last_cycle.get("started_at") or "never"))
+    table.add_row("Last Cycle Status", str(last_cycle.get("status") or "unknown"))
+    table.add_row("Last Reconciliation", str(health.get("last_reconciled_at") or "never"))
+    table.add_row("Open Positions", str(health.get("open_positions", 0)))
+    table.add_row("Active Orders", str(health.get("active_orders", 0)))
+    table.add_row("Unprotected", ", ".join(health.get("unprotected_tickers") or []) or "none")
+    table.add_row("Risk Halt", str(bool(risk.get("manual_halt") or risk.get("halted_until"))))
+    table.add_row("Risk Reason", str(risk.get("halt_reason") or "none"))
+    table.add_row("Confirmed Fills", str(performance.get("fill_count", 0)))
+    table.add_row("Realized P&L", f"${float(performance.get('realized_pnl', 0)):,.2f}")
+    console.print(table)
+
+
+@app.command("halt-trading")
+def halt_trading_command(
+    reason: str = typer.Option("manual operator halt", "--reason", help="Audit reason for the halt."),
+):
+    """Persistently disable broker-backed new trading."""
+    from tradingagents.state_store import StrategyStateStore
+
+    store = StrategyStateStore(DEFAULT_CONFIG.get("data_cache_dir", "data") + "/strategy_state.db")
+    store.set_manual_halt(reason)
+    console.print(f"[red]Trading halted:[/red] {reason}")
+
+
+@app.command("resume-trading")
+def resume_trading_command(
+    confirmation: str = typer.Option(..., "--confirmation", help="Enter RESUME TRADING exactly."),
+):
+    """Clear a persistent manual/risk halt after the cause has been reviewed."""
+    if confirmation != "RESUME TRADING":
+        console.print("[red]Confirmation must be exactly: RESUME TRADING[/red]")
+        raise typer.Exit(2)
+    from tradingagents.state_store import StrategyStateStore
+
+    store = StrategyStateStore(DEFAULT_CONFIG.get("data_cache_dir", "data") + "/strategy_state.db")
+    store.clear_manual_halt()
+    console.print("[green]Trading halt cleared.[/green]")
+
+
+@app.command("acknowledge-health")
+def acknowledge_health_command(
+    note: str = typer.Option(..., "--note", help="What was reviewed and corrected."),
+):
+    """Acknowledge reviewed health events while preserving their audit history."""
+    from tradingagents.state_store import StrategyStateStore
+
+    store = StrategyStateStore(DEFAULT_CONFIG.get("data_cache_dir", "data") + "/strategy_state.db")
+    count = store.acknowledge_health_events(note)
+    console.print(f"[green]Acknowledged {count} health event(s).[/green]")
+
+
+@app.command("release-audit")
+def release_audit_command():
+    """Generate the machine-checked report required before real mode can unlock."""
+    from tradingagents.risk.release_gate import build_release_report, release_strategy_config
+    from tradingagents.risk.scorecard import Scorecard
+    from tradingagents.state_store import StrategyStateStore
+
+    strategy_key = (
+        f"full_graph:{DEFAULT_CONFIG.get('strategy_version', 'unknown')}:"
+        f"{DEFAULT_CONFIG.get('llm_provider', 'unknown')}:"
+        f"{DEFAULT_CONFIG.get('quick_think_llm', 'unknown')}:"
+        f"{DEFAULT_CONFIG.get('deep_think_llm', 'unknown')}"
+    )
+    store = StrategyStateStore(DEFAULT_CONFIG.get("data_cache_dir", "data") + "/strategy_state.db")
+    scorecard = Scorecard(
+        Path(DEFAULT_CONFIG.get("data_cache_dir", "data")) / "scorecard.db"
+    )
+    output_path = Path(str(DEFAULT_CONFIG.get("real_money_validation_report")))
+    report = build_release_report(
+        store=store,
+        scorecard=scorecard,
+        strategy_key=strategy_key,
+        account_id=str(DEFAULT_CONFIG.get("expected_real_account_id", "")),
+        output_path=output_path,
+        strategy_config=release_strategy_config(DEFAULT_CONFIG),
+        backtest_validation_path=DEFAULT_CONFIG.get("backtest_validation_report"),
+    )
+    table = Table(title="Real-Money Release Audit", box=box.SIMPLE)
+    table.add_column("Gate", style="cyan")
+    table.add_column("Passed", justify="center")
+    for name, passed in report["checks"].items():
+        table.add_row(name.replace("_", " "), "yes" if passed else "NO")
+    console.print(table)
+    console.print(f"Report: {output_path}")
+    if not report["approved"]:
+        console.print("[red]Real-money mode remains locked.[/red]")
+        raise typer.Exit(1)
+    console.print("[green]Release gates passed. Real mode still requires all runtime locks.[/green]")
+
+
+@app.command("backup-state")
+def backup_state_command(
+    output_dir: Path = typer.Option(
+        Path("backups"), "--output-dir", help="Directory for verified SQLite backups."
+    ),
+):
+    """Create and integrity-check a backup of the autonomous-trader ledger."""
+    from tradingagents.state_store import StrategyStateStore
+
+    source = Path(DEFAULT_CONFIG.get("data_cache_dir", "data")) / "strategy_state.db"
+    store = StrategyStateStore(source)
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    target = output_dir / f"strategy-state-{timestamp}.db"
+    store.backup_to(target)
+    console.print(f"[green]Verified backup created:[/green] {target.resolve()}")
+
+
 @app.command("run-cycle")
 def run_cycle_command(
     mode: str = typer.Option(
         "dry-run",
         "--mode",
-        help="Execution mode: dry-run, shadow, or live.",
+        help="Execution mode: dry-run, shadow, paper, or real. 'live' is a safe paper alias.",
     ),
     tickers: Optional[str] = typer.Option(
         None,
@@ -1544,17 +1754,22 @@ def run_cycle_command(
         help="Allow manual tickers to trade even when they are not on the congressional watchlist.",
     ),
     min_conviction: int = typer.Option(
-        6,
+        int(DEFAULT_CONFIG.get("congressional_min_conviction_score", 6)),
         "--min-conviction",
         min=1,
         max=10,
         help="Minimum congressional conviction score.",
     ),
     lookback_days: int = typer.Option(
-        45,
+        int(DEFAULT_CONFIG.get("congressional_lookback_days", 45)),
         "--lookback-days",
         min=1,
         help="Congressional disclosure lookback window.",
+    ),
+    confirm_real_money: Optional[str] = typer.Option(
+        None,
+        "--confirm-real-money",
+        help="Exact one-time confirmation phrase required only for real mode.",
     ),
 ):
     """Run one background trading cycle."""
@@ -1567,6 +1782,7 @@ def run_cycle_command(
             lookback_days=lookback_days,
             allow_manual_tickers=allow_manual_tickers,
             mode=mode,
+            real_money_confirmation=confirm_real_money,
         )
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
@@ -1583,7 +1799,8 @@ def run_cycle_command(
     table.add_row("Status", str(summary.get("status")))
     table.add_row("Tickers", str(summary.get("tickers", 0)))
     table.add_row("Signals", str(summary.get("signals", 0)))
-    table.add_row("Executed", str(summary.get("executed", 0)))
+    table.add_row("Orders Submitted", str(summary.get("submitted", 0)))
+    table.add_row("Confirmed Fill Events", str(summary.get("executed", 0)))
     table.add_row("Simulated", str(summary.get("simulated", 0)))
     if summary.get("reason"):
         table.add_row("Reason", str(summary["reason"]))
@@ -1595,13 +1812,18 @@ def run_bot_command(
     mode: str = typer.Option(
         "dry-run",
         "--mode",
-        help="Execution mode: dry-run, shadow, or live.",
+        help="Execution mode: dry-run, shadow, paper, or real. 'live' is a safe paper alias.",
     ),
-    interval: int = typer.Option(
-        30,
+    interval: Optional[int] = typer.Option(
+        None,
         "--interval",
         min=1,
-        help="Minutes between cycles.",
+        help="Minutes between cycles. Overrides the weekday schedule.",
+    ),
+    daily_at: str = typer.Option(
+        "08:45",
+        "--daily-at",
+        help="Weekday run time in 24-hour America/Chicago time.",
     ),
     tickers: Optional[str] = typer.Option(
         None,
@@ -1613,12 +1835,32 @@ def run_bot_command(
         "--allow-manual-tickers/--no-allow-manual-tickers",
         help="Allow manual tickers to trade even when they are not on the congressional watchlist.",
     ),
+    run_now: bool = typer.Option(
+        True,
+        "--run-now/--wait-first",
+        help="Run one cycle at startup instead of waiting for the first interval.",
+    ),
+    log_file: Path = typer.Option(
+        Path("logs/trading-bot.log"),
+        "--log-file",
+        help="Rotating log file for unattended runs.",
+    ),
+    confirm_real_money: Optional[str] = typer.Option(
+        None,
+        "--confirm-real-money",
+        help="Exact one-time confirmation phrase required only for real mode.",
+    ),
 ):
     """Run the bot continuously until stopped."""
     from tradingagents.scheduler.runner import start_scheduler
 
+    resolved_log = _configure_bot_logging(log_file)
+    schedule_text = (
+        f"every {interval}m" if interval is not None else f"weekdays at {daily_at} CT"
+    )
     console.print(
-        f"[cyan]Starting bot[/cyan]: mode={mode}, interval={interval}m. Press Ctrl+C to stop."
+        f"[cyan]Starting bot[/cyan]: mode={mode}, schedule={schedule_text}, "
+        f"log={resolved_log}. Press Ctrl+C to stop."
     )
     try:
         start_scheduler(
@@ -1626,8 +1868,11 @@ def run_bot_command(
             mode=mode,
             tickers=_parse_ticker_csv(tickers),
             allow_manual_tickers=allow_manual_tickers,
+            run_immediately=run_now,
+            daily_at=daily_at,
+            real_money_confirmation=confirm_real_money,
         )
-    except ValueError as exc:
+    except (ValueError, RuntimeError) as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(2) from exc
     except KeyboardInterrupt:
@@ -1718,6 +1963,130 @@ def walk_forward_command(
     table.add_row("Trades", str(result["num_trades"]))
     table.add_row("Final Equity", f"${result['final_equity']:,.2f}")
     console.print(table)
+
+
+@app.command("replay-backtest")
+def replay_backtest_command(
+    ticker: Optional[str] = typer.Option(
+        None, "--ticker", help="One ticker to inspect; not enough for release validation."
+    ),
+    tickers: Optional[str] = typer.Option(
+        None, "--tickers", help="Comma-separated tickers for cross-ticker validation."
+    ),
+    strategy_key: Optional[str] = typer.Option(
+        None, "--strategy-key", help="Optional exact scorecard strategy version to replay."
+    ),
+    initial_cash: float = typer.Option(
+        10_000.0, "--initial-cash", min=100.0, help="Starting simulated cash."
+    ),
+    output_report: Path = typer.Option(
+        Path(str(DEFAULT_CONFIG.get("backtest_validation_report"))),
+        "--output-report",
+        help="JSON evidence file consumed by the real-money release audit.",
+    ),
+):
+    """Backtest stored graph ratings using the scheduler's actual entry/exit rules."""
+    from datetime import timedelta
+
+    import yfinance as yf
+
+    from backtests.strategy_replay import (
+        ReplayConfig,
+        replay_graph_decisions,
+        summarize_replay_results,
+    )
+    from tradingagents.risk.scorecard import Scorecard
+    from tradingagents.strategy.rules import strategy_rules_from_config
+
+    current_strategy_key = (
+        f"full_graph:{DEFAULT_CONFIG.get('strategy_version', 'unknown')}:"
+        f"{DEFAULT_CONFIG.get('llm_provider', 'unknown')}:"
+        f"{DEFAULT_CONFIG.get('quick_think_llm', 'unknown')}:"
+        f"{DEFAULT_CONFIG.get('deep_think_llm', 'unknown')}"
+    )
+    selected_strategy_key = strategy_key or current_strategy_key
+    requested_tickers = []
+    for value in ([ticker] if ticker else []) + ((tickers or "").split(",")):
+        normalized = value.strip().upper()
+        if normalized and normalized not in requested_tickers:
+            requested_tickers.append(normalized)
+    if not requested_tickers:
+        console.print("[red]Provide --ticker or --tickers.[/red]")
+        raise typer.Exit(2)
+
+    scorecard = Scorecard(
+        Path(DEFAULT_CONFIG.get("data_cache_dir", "data")) / "scorecard.db"
+    )
+    results = {}
+    stored_decisions = 0
+    rules = strategy_rules_from_config(DEFAULT_CONFIG)
+    for symbol in requested_tickers:
+        decisions = scorecard.decisions_for_ticker(
+            symbol,
+            strategy_key=selected_strategy_key,
+        )
+        if not decisions:
+            console.print(f"[yellow]Skipping {symbol}: no stored decisions.[/yellow]")
+            continue
+        start = (
+            datetime.datetime.fromisoformat(decisions[0]["trade_date"]).date()
+            - timedelta(days=7)
+        )
+        end = (
+            datetime.datetime.fromisoformat(decisions[-1]["trade_date"]).date()
+            + timedelta(days=30)
+        )
+        prices = yf.download(
+            symbol,
+            start=start.isoformat(),
+            end=end.isoformat(),
+            progress=False,
+            auto_adjust=False,
+            multi_level_index=False,
+        )
+        if prices.empty:
+            console.print(f"[yellow]Skipping {symbol}: no price history.[/yellow]")
+            continue
+        results[symbol] = replay_graph_decisions(
+            prices.reset_index(),
+            decisions,
+            rules=rules,
+            config=ReplayConfig(initial_cash=initial_cash),
+        )
+        stored_decisions += len(decisions)
+    if not results:
+        console.print("[red]No requested ticker had both decisions and price history.[/red]")
+        raise typer.Exit(1)
+    result = summarize_replay_results(results)
+    import json
+
+    output_report.parent.mkdir(parents=True, exist_ok=True)
+    output_report.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "strategy_key": selected_strategy_key,
+                "stored_decisions": stored_decisions,
+                "result": result,
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    table = Table(title="Cross-Ticker Graph Decision Replay", box=box.SIMPLE)
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", justify="right")
+    table.add_row("Tickers", ", ".join(result["tickers"]))
+    table.add_row("Stored Decisions", str(stored_decisions))
+    table.add_row("Completed Trades", str(result["num_trades"]))
+    table.add_row("Total Return", f"{result['total_return_pct']:.2f}%")
+    table.add_row("Buy-and-Hold Return", f"{result['benchmark_return_pct']:.2f}%")
+    table.add_row("Alpha", f"{result['alpha_pct']:+.2f}%")
+    table.add_row("Worst Drawdown", f"{result['max_drawdown_pct']:.2f}%")
+    console.print(table)
+    console.print(f"Validation report: {output_report.resolve()}")
 
 
 @app.command("replay")

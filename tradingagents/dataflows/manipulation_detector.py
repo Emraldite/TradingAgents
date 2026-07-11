@@ -3,19 +3,25 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from tradingagents.dataflows.stocktwits_data import fetch_stream, parse_sentiment, calculate_velocity
+from tradingagents.dataflows.stocktwits_data import (
+    fetch_stream_checked,
+    parse_sentiment,
+    calculate_velocity,
+)
 
 logger = logging.getLogger(__name__)
 
 
 def detect_manipulation(ticker: str) -> dict[str, Any]:
-    messages = fetch_stream(ticker, limit=30)
+    messages, error = fetch_stream_checked(ticker, limit=30)
     if not messages:
         return {
             "ticker": ticker,
-            "organic_score": 10.0,
-            "manipulation_risk": 0.0,
-            "recommendation": "PASS",
+            "status": "unavailable" if error else "available",
+            "error": error,
+            "organic_score": None,
+            "manipulation_risk": None,
+            "recommendation": "UNKNOWN",
             "details": {},
         }
 
@@ -50,6 +56,8 @@ def detect_manipulation(ticker: str) -> dict[str, Any]:
 
     return {
         "ticker": ticker,
+        "status": "available",
+        "error": None,
         "organic_score": round(organic_score, 1),
         "manipulation_risk": round(total_manipulation, 1),
         "recommendation": recommendation,

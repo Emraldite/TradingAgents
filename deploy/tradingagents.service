@@ -1,0 +1,27 @@
+[Unit]
+Description=TradingAgents autonomous paper trader
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/trader
+EnvironmentFile=%h/trader/.env
+ExecStart=%h/trader/.venv/bin/tradingagents run-bot --mode paper --tickers AAPL,MSFT,NVDA
+Restart=on-failure
+RestartSec=30
+UMask=0077
+Environment=PYTHONDONTWRITEBYTECODE=1
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+ReadWritePaths=%h/.tradingagents %h/trader/logs %h/trader/backups
+
+[Install]
+WantedBy=default.target

@@ -1,128 +1,167 @@
 # TradingAgents Extended
 
-Swing trading research bot built from a fork of TradingAgents. This project adds congressional trading signals, social manipulation checks, portfolio risk controls, multi-analyst graph-driven entries, backtesting, and Alpaca paper trading.
+An AI-assisted swing-trading research and execution system. It collects market,
+news, social, fundamental, and congressional-trading signals; asks a multi-agent
+analysis graph for a rating; applies deterministic risk rules; and can submit
+Alpaca orders.
 
-This is a personal learning and portfolio project. It is not financial advice, and it should stay in paper trading until the strategy has been validated over time.
+This is an educational project, not financial advice or a proven profitable
+strategy. Keep it in paper mode until every machine-checked release gate passes.
 
-## What It Does
+## Free-first stack
 
-- Builds a congressional trade watchlist from Capitol Trades and Quiver pages.
-- Scores tickers by conviction using recency, trade size, source overlap, and committee relevance.
-- Runs the full analyst graph across congressional, market, sentiment, news, and fundamentals before opening new positions.
-- Checks social manipulation risk with StockTwits activity signals.
-- Applies basic survival rules before any order: position sizing, max open positions, volume filters, and kill switch.
-- Sends paper orders to Alpaca through direct REST API calls.
-- Tracks cycles and real paper-trade entries in SQLite.
-- Keeps dry-run simulations separate from real trade records.
+- Gemini's free API tier or a local Ollama model for AI analysis
+- yfinance and public web sources for delayed/research data
+- Alpaca's free paper-trading account for execution testing
+- SQLite for the local order, fill, risk, health, and performance ledger
+- Oracle Always Free as an optional paper-bot host
+
+No paid software is required. Real trading is not literally cost-free: spreads,
+slippage, regulatory fees, taxes, internet/electricity, and provider quota changes
+can still create costs.
+
+## How a cycle works
+
+1. Select a small ticker universe from explicit tickers or congressional signals.
+2. Reject missing/stale prices and unavailable manipulation data in broker modes.
+3. Run the analyst graph and store its versioned Buy, Overweight, Hold,
+   Underweight, or Sell rating.
+4. Apply non-AI rules for position count, volume, exposure, scorecard confidence,
+   and persistent daily/weekly/total loss limits.
+5. Submit an idempotent bracket order: entry plus broker-native stop-loss and
+   take-profit protection.
+6. Reconcile WebSocket and REST broker updates into SQLite. Only confirmed fill
+   increases alter positions or performance.
+7. Halt safely when account state, protection, data, or configured limits are bad.
+
+The AI proposes a direction. Deterministic code controls whether it may trade and
+how much money it may touch.
 
 ## Setup
 
-Use `uv` for dependency management.
+Use `uv`; do not install dependencies with bare `pip`.
 
 ```powershell
+uv venv
+uv pin
 uv sync
+Copy-Item .env.example .env
 ```
 
-Create a local `.env` file with the keys you use:
+Fill in `GOOGLE_API_KEY`, `ALPACA_API_KEY`, and `ALPACA_SECRET_KEY`. Leave
+`ALPACA_BASE_URL=https://paper-api.alpaca.markets` and all real-money locks at
+their defaults. Never commit `.env`.
 
-```env
-GOOGLE_API_KEY=
-NEWS_API_KEY=
-ALPACA_API_KEY=
-ALPACA_SECRET_KEY=
-ALPACA_BASE_URL=https://paper-api.alpaca.markets
-```
-
-Do not commit `.env`.
-
-## Verify The Project
-
-Run the test suite:
+To guarantee no model bill, use a Gemini project that has no billing account
+attached and stay within its free quota, or use Ollama locally. Free Alpaca market
+data is [real-time IEX-only](https://docs.alpaca.markets/docs/about-market-data-api),
+so the bot rejects stale or unusually wide IEX quotes;
+it does not pretend that this free feed has full-market SIP coverage.
 
 ```powershell
 uv run pytest
-```
-
-Check Alpaca paper account, open positions, and recent orders:
-
-```powershell
 uv run tradingagents broker-status
+uv run tradingagents health
 ```
 
-Show more recent orders:
+## Safe progression
+
+### 1. Dry-run
+
+Analyzes data but neither simulates holdings nor contacts the broker for orders.
 
 ```powershell
-uv run tradingagents broker-status --limit 20
+uv run tradingagents run-cycle --mode dry-run --tickers AAPL
 ```
 
-## Trading Cycle
+### 2. Shadow
 
-Dry-run mode is the default and does not write fake trades into the performance tracker:
+Uses verified broker account value but keeps simulated fills separate from broker
+fills. Use this to observe behavior without submitting orders.
 
 ```powershell
-uv run python -c "import logging; logging.basicConfig(level=logging.INFO); from tradingagents.scheduler.runner import run_cycle; run_cycle(dry_run=True)"
+uv run tradingagents run-cycle --mode shadow --tickers AAPL
 ```
 
-Manual tickers bypass the congressional watchlist by default. This command will trade `AAPL` even if congressional data is empty:
+### 3. Paper
+
+Submits actual orders to Alpaca's paper endpoint. The deprecated mode name `live`
+is accepted only as a safe alias for `paper`; it never means real money.
 
 ```powershell
-uv run python -c "import logging; logging.basicConfig(level=logging.INFO); from tradingagents.scheduler.runner import run_cycle; run_cycle(tickers=['AAPL'], dry_run=True)"
+uv run tradingagents run-cycle --mode paper --tickers AAPL
+uv run tradingagents run-bot --mode paper --tickers AAPL,NVDA,MSFT
 ```
 
-If you want the old congressional-only gate, explicitly turn the override off:
+The bot runs once immediately and then at 8:45 AM America/Chicago each weekday.
+Keep the terminal open and use `Ctrl+C` for a clean stop. Use `--wait-first`,
+`--daily-at HH:MM`, or `--interval MINUTES` when needed.
+
+### 4. Evidence and release audit
+
+Resolve forward outcomes, replay the stored decisions with fees/slippage against
+buy-and-hold, and run the release audit:
 
 ```powershell
-uv run python -c "import logging; logging.basicConfig(level=logging.INFO); from tradingagents.scheduler.runner import run_cycle; run_cycle(tickers=['AAPL'], dry_run=True, allow_manual_tickers=False)"
+uv run tradingagents scorecard --resolve
+uv run tradingagents replay-backtest --tickers AAPL,MSFT,NVDA,AMZN,GOOGL
+uv run tradingagents release-audit
 ```
 
-Place real paper orders only after dry-run behavior looks sane:
+Real mode stays locked unless the current strategy has at least 100 resolved
+directional decisions, positive forward alpha, controlled drawdown, at least 100
+paper cycles spanning 90 days, an acceptable failure rate, a qualifying replay,
+no unresolved cycles or critical health events, and no active/unprotected orders.
+Changing a model or risk setting invalidates the report.
+
+### 5. Real money (locked by default)
+
+Only the legal account owner should ever configure this. Alpaca currently requires
+an [individual applicant to be at least 18](https://alpaca.markets/support/requirements-alpaca-brokerage-account);
+its [custodial documentation](https://docs.alpaca.markets/docs/custodial-accounts)
+says a minor is only the beneficiary and cannot trade the account. Set a very small fixed
+notional cap, exact account ID, real Alpaca endpoint, free model provider, and the
+two validation-report paths in `.env`. A fresh approved audit and the exact phrase
+`ENABLE REAL MONEY` are still required at runtime.
 
 ```powershell
-uv run python -c "import logging; logging.basicConfig(level=logging.INFO); from tradingagents.scheduler.runner import run_cycle; run_cycle(dry_run=False)"
+uv run tradingagents run-cycle --mode real --confirm-real-money "ENABLE REAL MONEY"
 ```
 
-Run a no-foresight historical simulation before trusting a signal live:
+Do not run real mode as an unattended service initially. The included deployment
+template intentionally permits paper mode only.
+
+## Operations
 
 ```powershell
-uv run tradingagents walk-forward --ticker AAPL --start 2020-01-01 --end 2025-01-01 --position-pct 0.02
+uv run tradingagents health
+uv run tradingagents halt-trading --reason "operator review"
+uv run tradingagents acknowledge-health --note "reviewed and corrected"
+uv run tradingagents resume-trading --confirmation "RESUME TRADING"
+uv run tradingagents backup-state
 ```
 
-If `uv run` is blocked by a local uv cache issue on Windows, use the project venv directly:
+The process lock prevents two bots from trading the same local state at once.
+Critical errors remain in an acknowledgement audit trail. Backups are made with
+SQLite's backup API and pass an integrity check before success is reported.
+
+## Backtests
+
+`walk-forward` tests the older deterministic technical proxy. `replay-backtest`
+is the relevant validation command because it executes stored graph decisions on
+the next bar using the same strategy exits and configured sizing rules as the bot.
+One ticker is useful for inspection, but release validation requires at least five.
 
 ```powershell
-.\.venv\Scripts\python.exe -c "import sys; sys.stdout.reconfigure(encoding='utf-8'); from typer.testing import CliRunner; from cli.main import app; result = CliRunner().invoke(app, ['walk-forward', '--ticker', 'AAPL', '--start', '2020-01-01', '--end', '2025-01-01', '--position-pct', '0.02']); print(result.output)"
+uv run tradingagents walk-forward --ticker AAPL --start 2020-01-01 --end 2025-01-01
+uv run tradingagents replay-backtest --ticker AAPL
 ```
 
-## CLI Analysis
+Neither result guarantees future returns. Avoid selecting only the best ticker or
+date range after seeing results; that is overfitting.
 
-Run the interactive multi-agent analyst workflow:
+## Deployment
 
-```powershell
-uv run tradingagents analyze
-```
-
-Resume support is available with checkpoints:
-
-```powershell
-uv run tradingagents analyze --checkpoint
-```
-
-## Current Safety Defaults
-
-- Scheduler defaults to `dry_run=True`.
-- Manual tickers are allowed by default; set `allow_manual_tickers=False` if you want congressional-only gating.
-- New entries require a graph rating of `Buy` or `Overweight`; `Hold`, `Underweight`, and `Sell` are skipped.
-- Position sizing is intentionally low-risk by default: `Buy` = 2%, `Overweight` = 1%, max single position = 3%.
-- Alpaca uses the paper endpoint from `ALPACA_BASE_URL`.
-- Dry-runs log simulated counts but do not create fake trade entries.
-- Real paper orders are tracked after Alpaca accepts the order.
-
-## Project Status
-
-Tests currently pass with one expected skipped live DeepSeek test when `DEEPSEEK_API_KEY` is not configured.
-
-Next useful improvements:
-
-- Add a first-class scheduler CLI command instead of one-line Python calls.
-- Improve congressional data reliability if Quiver continues serving table rows through JavaScript.
-- Add exit logic and sell-side tracking before unattended paper trading.
+See [deploy/README.md](deploy/README.md) for the free Oracle VM paper-only service
+template. Keep `.env`, databases, backups, caches, and logs outside Git and test a
+backup restore before relying on unattended operation.

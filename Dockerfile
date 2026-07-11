@@ -1,28 +1,25 @@
-FROM python:3.12-slim AS builder
+FROM ghcr.io/astral-sh/uv:0.11.28-python3.13-bookworm-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PYTHONUNBUFFERED=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    PATH="/app/.venv/bin:$PATH"
 
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+WORKDIR /app
 
-WORKDIR /build
+# Copy dependency metadata first so Docker can reuse the expensive install layer.
+COPY pyproject.toml uv.lock README.md ./
+RUN uv sync --frozen --no-dev --no-install-project
+
 COPY . .
-RUN pip install --no-cache-dir .
+RUN uv sync --frozen --no-dev \
+    && useradd --create-home appuser \
+    && install -d -m 0755 -o appuser -g appuser \
+        /home/appuser/.tradingagents /app/logs /app/backups \
+    && chown -R appuser:appuser /app
 
-FROM python:3.12-slim
-
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
-
-COPY --from=builder /opt/venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
-RUN useradd --create-home appuser \
- && install -d -m 0755 -o appuser -g appuser /home/appuser/.tradingagents
 USER appuser
-WORKDIR /home/appuser/app
-
-COPY --from=builder --chown=appuser:appuser /build .
 
 ENTRYPOINT ["tradingagents"]
+CMD ["--help"]
