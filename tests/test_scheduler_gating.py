@@ -222,6 +222,27 @@ def test_free_llm_guard_accepts_configured_gemini_models(monkeypatch):
     assert _validate_free_llm_config() is None
 
 
+def test_free_llm_guard_accepts_configured_groq_model(monkeypatch):
+    from tradingagents.scheduler import runner
+
+    model = "meta-llama/llama-4-scout-17b-16e-instruct"
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "llm_provider", "groq")
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "quick_think_llm", model)
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "deep_think_llm", model)
+
+    assert _validate_free_llm_config() is None
+
+
+def test_free_llm_guard_rejects_unapproved_groq_model(monkeypatch):
+    from tradingagents.scheduler import runner
+
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "llm_provider", "groq")
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "quick_think_llm", "paid-model")
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "deep_think_llm", "paid-model")
+
+    assert "unapproved Groq" in _validate_free_llm_config()
+
+
 def test_free_llm_guard_rejects_paid_google_model(monkeypatch):
     from tradingagents.scheduler import runner
 

@@ -269,6 +269,7 @@ def select_llm_provider() -> tuple[str, str | None]:
     PROVIDERS = [
         ("OpenAI", "openai", "https://api.openai.com/v1"),
         ("Google", "google", None),
+        ("Groq", "groq", "https://api.groq.com/openai/v1"),
         ("Anthropic", "anthropic", "https://api.anthropic.com/"),
         ("xAI", "xai", "https://api.x.ai/v1"),
         ("DeepSeek", "deepseek", "https://api.deepseek.com"),

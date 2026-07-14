@@ -267,6 +267,23 @@ def test_authentication_failure_does_not_waste_a_second_model_request():
     plain.invoke.assert_not_called()
 
 
+def test_service_unavailable_does_not_waste_a_second_model_request():
+    structured = MagicMock()
+    structured.invoke.side_effect = RuntimeError("503 UNAVAILABLE: high demand")
+    plain = MagicMock()
+
+    with pytest.raises(RuntimeError, match="UNAVAILABLE"):
+        invoke_structured_or_freetext(
+            structured,
+            plain,
+            "prompt",
+            lambda result: str(result),
+            "Test Agent",
+        )
+
+    plain.invoke.assert_not_called()
+
+
 def test_malformed_structured_response_still_uses_freetext_fallback():
     structured = MagicMock()
     structured.invoke.side_effect = ValueError("malformed structured response")

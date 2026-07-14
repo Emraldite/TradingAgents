@@ -38,6 +38,9 @@ def _provider_request_cannot_succeed(exc: Exception) -> bool:
             "RATE_LIMIT",
             "RATE LIMIT",
             "QUOTA EXCEEDED",
+            "SERVICE UNAVAILABLE",
+            "UNAVAILABLE",
+            "503",
             "PERMISSION_DENIED",
             "UNAUTHENTICATED",
         )

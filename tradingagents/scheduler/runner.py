@@ -65,6 +65,9 @@ APPROVED_FREE_GOOGLE_MODELS = frozenset(
         "gemini-2.5-flash-lite",
     }
 )
+APPROVED_FREE_GROQ_MODELS = frozenset(
+    {"meta-llama/llama-4-scout-17b-16e-instruct"}
+)
 
 TECHNICAL_SCREEN_TICKERS = [
     "AAPL",
@@ -119,20 +122,25 @@ def _validate_free_llm_config() -> str | None:
     provider = str(DEFAULT_CONFIG.get("llm_provider", "")).strip().lower()
     if provider == "ollama":
         return None
-    if provider != "google":
+    if provider not in {"google", "groq"}:
         return (
             "Automated cycles require a zero-cost supported LLM provider "
-            "(google or ollama)"
+            "(google, groq, or ollama)"
         )
 
     configured_models = {
         str(DEFAULT_CONFIG.get("quick_think_llm", "")).strip().lower(),
         str(DEFAULT_CONFIG.get("deep_think_llm", "")).strip().lower(),
     }
-    rejected = sorted(configured_models - APPROVED_FREE_GOOGLE_MODELS)
+    approved_models = (
+        APPROVED_FREE_GOOGLE_MODELS
+        if provider == "google"
+        else APPROVED_FREE_GROQ_MODELS
+    )
+    rejected = sorted(configured_models - approved_models)
     if rejected:
         return (
-            "Free-only mode rejected unapproved Google model(s): "
+            f"Free-only mode rejected unapproved {provider.title()} model(s): "
             f"{', '.join(rejected)}"
         )
     return None
@@ -675,8 +683,8 @@ def _validate_broker_mode(
         return "Real mode refuses to use Alpaca's paper endpoint"
     if not bool(DEFAULT_CONFIG.get("allow_real_money", False)):
         return "TRADINGAGENTS_ALLOW_REAL_MONEY is not enabled"
-    if str(DEFAULT_CONFIG.get("llm_provider", "")).lower() not in {"google", "ollama"}:
-        return "Real mode requires a zero-cost supported LLM provider (google or ollama)"
+    if str(DEFAULT_CONFIG.get("llm_provider", "")).lower() not in {"google", "groq", "ollama"}:
+        return "Real mode requires a zero-cost supported LLM provider (google, groq, or ollama)"
     expected_account = str(DEFAULT_CONFIG.get("expected_real_account_id", "")).strip()
     if not expected_account or expected_account != str(account.get("account_id", "")):
         return "Real Alpaca account ID does not match the configured expected account"

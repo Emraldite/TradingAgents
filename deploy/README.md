@@ -3,6 +3,8 @@
 Use `uv` plus a user-level `systemd` service. This is lighter than Docker and
 keeps the bot, SQLite state, logs, and backups easy to inspect. The checked-in
 service is intentionally locked to Alpaca **paper mode** and three liquid tickers.
+It uses only hardening directives supported by Oracle's unprivileged user systemd;
+the bot still runs as the non-root VM user with `NoNewPrivileges` and `UMask=0077`.
 
 These commands assume Ubuntu and that your repository will live at `~/trader`.
 Replace the GitHub URL before running them.
@@ -42,7 +44,7 @@ chmod 600 .env
 mkdir -p ~/.tradingagents ~/trader/logs ~/trader/backups
 ```
 
-Set the Gemini and Alpaca **paper** keys. Keep all of these unchanged:
+Set the Groq and Alpaca **paper** keys. Keep all of these unchanged:
 
 ```dotenv
 ALPACA_BASE_URL=https://paper-api.alpaca.markets
@@ -50,17 +52,21 @@ TRADINGAGENTS_ALLOW_REAL_MONEY=false
 TRADINGAGENTS_MAX_REAL_MONEY_NOTIONAL=0
 ```
 
-The checked-in free model pair is:
+The checked-in free provider configuration is:
 
 ```dotenv
-TRADINGAGENTS_DEEP_THINK_LLM=gemini-3.5-flash
-TRADINGAGENTS_QUICK_THINK_LLM=gemini-3.1-flash-lite
+TRADINGAGENTS_LLM_PROVIDER=groq
+TRADINGAGENTS_DEEP_THINK_LLM=meta-llama/llama-4-scout-17b-16e-instruct
+TRADINGAGENTS_QUICK_THINK_LLM=meta-llama/llama-4-scout-17b-16e-instruct
+TRADINGAGENTS_GROQ_REQUESTS_PER_MINUTE=6
+TRADINGAGENTS_GROQ_MAX_RETRIES=1
 ```
 
 The scheduler rejects paid or unknown hosted models and never switches models
-after a quota error. If 3.5 Flash has no free quota, stop the service and manually
-set both variables to `gemini-3.1-flash-lite`. This starts a distinct strategy
-history; do not mix its evidence with the 3.5 Flash configuration.
+or providers after a quota error. The shared limiter paces both model roles and
+all tickers in one cycle. Keep the Groq account on its free plan; if Groq changes
+its free limits, stop the service and adjust only after checking the current
+limits and rerunning the test suite.
 
 Never copy your local `.env` into GitHub. Transfer its values privately or create
 the VM file manually.
@@ -77,8 +83,8 @@ uv run tradingagents run-cycle --mode dry-run --tickers AAPL,MSFT,NVDA
 uv run tradingagents health
 ```
 
-Do not continue if the broker status points at a real-money endpoint, either
-configured Gemini model has zero active free quota, or the dry run reports
+Do not continue if the broker status points at a real-money endpoint, the Groq
+account is not on the free plan, or the dry run reports
 configuration/data errors. Leave billing disabled; quota exhaustion should stop
 the bot rather than create a charge.
 

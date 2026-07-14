@@ -20,9 +20,11 @@ def _reload_with_env(monkeypatch, **overrides):
 
 def test_no_env_uses_built_in_defaults(monkeypatch):
     dc = _reload_with_env(monkeypatch)
-    assert dc.DEFAULT_CONFIG["llm_provider"] == "google"
-    assert dc.DEFAULT_CONFIG["deep_think_llm"] == "gemini-3.5-flash"
-    assert dc.DEFAULT_CONFIG["quick_think_llm"] == "gemini-3.1-flash-lite"
+    assert dc.DEFAULT_CONFIG["llm_provider"] == "groq"
+    assert dc.DEFAULT_CONFIG["deep_think_llm"] == "meta-llama/llama-4-scout-17b-16e-instruct"
+    assert dc.DEFAULT_CONFIG["quick_think_llm"] == "meta-llama/llama-4-scout-17b-16e-instruct"
+    assert dc.DEFAULT_CONFIG["groq_requests_per_minute"] == 6
+    assert dc.DEFAULT_CONFIG["groq_max_retries"] == 1
     assert dc.DEFAULT_CONFIG["backend_url"] is None
     assert dc.DEFAULT_CONFIG["max_debate_rounds"] == 1
     assert dc.DEFAULT_CONFIG["checkpoint_enabled"] is False
@@ -49,11 +51,15 @@ def test_int_coercion(monkeypatch):
         monkeypatch,
         TRADINGAGENTS_MAX_DEBATE_ROUNDS="3",
         TRADINGAGENTS_MAX_RISK_ROUNDS="2",
+        TRADINGAGENTS_GROQ_REQUESTS_PER_MINUTE="9",
+        TRADINGAGENTS_GROQ_MAX_RETRIES="2",
     )
     assert dc.DEFAULT_CONFIG["max_debate_rounds"] == 3
     assert isinstance(dc.DEFAULT_CONFIG["max_debate_rounds"], int)
     assert dc.DEFAULT_CONFIG["max_risk_discuss_rounds"] == 2
     assert isinstance(dc.DEFAULT_CONFIG["max_risk_discuss_rounds"], int)
+    assert dc.DEFAULT_CONFIG["groq_requests_per_minute"] == 9
+    assert dc.DEFAULT_CONFIG["groq_max_retries"] == 2
 
 
 def test_scheduler_float_coercion(monkeypatch):
@@ -103,7 +109,7 @@ def test_empty_env_value_is_passthrough(monkeypatch):
         TRADINGAGENTS_LLM_PROVIDER="",
         TRADINGAGENTS_MAX_DEBATE_ROUNDS="",
     )
-    assert dc.DEFAULT_CONFIG["llm_provider"] == "google"
+    assert dc.DEFAULT_CONFIG["llm_provider"] == "groq"
     assert dc.DEFAULT_CONFIG["max_debate_rounds"] == 1
 
 

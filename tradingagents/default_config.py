@@ -13,6 +13,8 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_QUICK_THINK_LLM":      "quick_think_llm",
     "TRADINGAGENTS_LLM_BACKEND_URL":      "backend_url",
     "TRADINGAGENTS_GOOGLE_THINKING_LEVEL": "google_thinking_level",
+    "TRADINGAGENTS_GROQ_REQUESTS_PER_MINUTE": "groq_requests_per_minute",
+    "TRADINGAGENTS_GROQ_MAX_RETRIES":     "groq_max_retries",
     "TRADINGAGENTS_OUTPUT_LANGUAGE":      "output_language",
     "TRADINGAGENTS_MAX_DEBATE_ROUNDS":    "max_debate_rounds",
     "TRADINGAGENTS_MAX_RISK_ROUNDS":      "max_risk_discuss_rounds",
@@ -93,9 +95,9 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # Pending entries are never pruned. None disables rotation entirely.
     "memory_log_max_entries": None,
     # LLM settings
-    "llm_provider": "google",
-    "deep_think_llm": "gemini-3.5-flash",
-    "quick_think_llm": "gemini-3.1-flash-lite",
+    "llm_provider": "groq",
+    "deep_think_llm": "meta-llama/llama-4-scout-17b-16e-instruct",
+    "quick_think_llm": "meta-llama/llama-4-scout-17b-16e-instruct",
     # When None, each provider's client falls back to its own default endpoint
     # (api.openai.com for OpenAI, generativelanguage.googleapis.com for Gemini, ...).
     # The CLI overrides this per provider when the user picks one. Keeping a
@@ -104,6 +106,8 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "backend_url": None,
     # Provider-specific thinking configuration
     "google_thinking_level": None,      # "high", "minimal", etc.
+    "groq_requests_per_minute": 6,
+    "groq_max_retries": 1,
     "openai_reasoning_effort": None,    # "medium", "high", "low"
     "anthropic_effort": None,           # "high", "medium", "low"
     # Checkpoint/resume: when True, LangGraph saves state after each node

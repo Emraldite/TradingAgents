@@ -150,6 +150,24 @@ class TradingAgentsGraph:
             if thinking_level:
                 kwargs["thinking_level"] = thinking_level
 
+        elif provider == "groq":
+            from langchain_core.rate_limiters import InMemoryRateLimiter
+
+            requests_per_minute = int(
+                self.config.get("groq_requests_per_minute", 6)
+            )
+            max_retries = int(self.config.get("groq_max_retries", 1))
+            if requests_per_minute <= 0:
+                raise ValueError("groq_requests_per_minute must be positive")
+            if max_retries < 0:
+                raise ValueError("groq_max_retries cannot be negative")
+            kwargs["rate_limiter"] = InMemoryRateLimiter(
+                requests_per_second=requests_per_minute / 60,
+                check_every_n_seconds=0.1,
+                max_bucket_size=1,
+            )
+            kwargs["max_retries"] = max_retries
+
         elif provider == "openai":
             reasoning_effort = self.config.get("openai_reasoning_effort")
             if reasoning_effort:

@@ -118,6 +118,20 @@ MODEL_OPTIONS: ProviderModeOptions = {
             ("Gemini 2.5 Flash - Balanced, stable", "gemini-2.5-flash"),
         ],
     },
+    "groq": {
+        "quick": [
+            (
+                "Llama 4 Scout - Free, 128K context, high token allowance",
+                "meta-llama/llama-4-scout-17b-16e-instruct",
+            ),
+        ],
+        "deep": [
+            (
+                "Llama 4 Scout - Free, tool use and structured output",
+                "meta-llama/llama-4-scout-17b-16e-instruct",
+            ),
+        ],
+    },
     "xai": {
         "quick": [
             ("Grok 4.20 (Non-Reasoning) - Latest, speed-optimized", "grok-4.20-non-reasoning"),

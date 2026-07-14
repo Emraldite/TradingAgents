@@ -228,7 +228,6 @@ uv-cache/
 .idea/
 .claude/
 .codex/
-.agents/
 .DS_Store
 Thumbs.db
 
@@ -273,5 +272,6 @@ docker-compose.override.yml
 id_rsa
 id_ed25519
 
-# Local Codex project memory; keep personal context out of the public repository.
+# Local agent memory and planning documents are never committed.
+.agents/
 .AGENT/

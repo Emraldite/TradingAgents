@@ -8,9 +8,49 @@ Alpaca orders.
 This is an educational project, not financial advice or a proven profitable
 strategy. Keep it in paper mode until every machine-checked release gate passes.
 
+## Resume from another account
+
+The `.agents/` memory and PRD files are local working notes and must never be
+staged or committed. Read them before changing code when they exist. If you need
+them on another machine, transfer them privately outside Git.
+
+On the new account or machine:
+
+```powershell
+git clone <your-repository-url> trader
+Set-Location trader
+uv venv
+uv pin
+uv sync
+Copy-Item .env.example .env
+uv run pytest
+git status --short
+```
+
+Copy the old machine's `.env` securely or fill the new one manually. Never send
+credentials through chat or commit them. Local `.agents/` notes, runtime SQLite
+databases, logs, and backups are intentionally not portable through Git; copy
+them separately only if needed, and keep a backup before replacing local state.
+
+### Current verified state (2026-07-14)
+
+- Last recorded full verification: 327 tests passed and 1 optional live-API test
+  was skipped. Run the suite again after cloning because this is a recorded
+  checkpoint, not a guarantee about a new environment.
+- Groq with Llama 4 Scout is the free hosted default. A live call still requires
+  your own free-plan Groq key and cannot be verified by the offline test suite.
+- The Oracle service omits user-systemd directives that caused exit
+  `218/CAPABILITIES`, while retaining non-root execution, `NoNewPrivileges`, and
+  `UMask=0077`.
+- Review `git status` and `git diff --cached` before editing; do not discard
+  deployment or provider changes that have not been committed yet.
+- The project is currently paper-first. Real-money mode remains intentionally
+  locked until all release gates pass.
+
 ## Free-first stack
 
-- Gemini's free API tier: 3.5 Flash for deep analysis and 3.1 Flash-Lite for routine work
+- Groq's free developer tier with Llama 4 Scout for all analysis
+- Gemini's free API tier or local Ollama as manual alternatives
 - yfinance and public web sources for delayed/research data
 - Alpaca's free paper-trading account for execution testing
 - SQLite for the local order, fill, risk, health, and performance ledger
@@ -48,16 +88,17 @@ uv sync
 Copy-Item .env.example .env
 ```
 
-Fill in `GOOGLE_API_KEY`, `ALPACA_API_KEY`, and `ALPACA_SECRET_KEY`. Leave
+Fill in `GROQ_API_KEY`, `ALPACA_API_KEY`, and `ALPACA_SECRET_KEY`. Leave
 `ALPACA_BASE_URL=https://paper-api.alpaca.markets` and all real-money locks at
 their defaults. Never commit `.env`.
 
-To guarantee no model bill, use a Gemini project that has no billing account
-attached and stay within its free quota, or use Ollama locally. The scheduler
-rejects paid or unknown hosted models before collecting data or creating orders.
-It never changes models automatically after a quota error. If 3.5 Flash has no
-free quota, manually set both model variables to `gemini-3.1-flash-lite`; the
-strategy identifier changes so results from different model pairs stay separate.
+Use a Groq account that remains on its free plan. The scheduler accepts only the
+checked-in Groq model in automated cycles, limits the whole graph to six requests
+per minute, and allows one client retry. It never changes providers or models
+after a quota error, and provider failures produce zero orders. These safeguards
+prevent accidental fallback to a paid model, but Groq controls its plans and
+limits, so verify your account still has no billing enabled before each deployment.
+Gemini and Ollama remain manual alternatives rather than automatic fallbacks.
 Free Alpaca market
 data is [real-time IEX-only](https://docs.alpaca.markets/docs/about-market-data-api),
 so the bot rejects stale or unusually wide IEX quotes;

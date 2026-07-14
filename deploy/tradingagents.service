@@ -13,15 +13,6 @@ RestartSec=30
 UMask=0077
 Environment=PYTHONDONTWRITEBYTECODE=1
 NoNewPrivileges=true
-PrivateTmp=true
-PrivateDevices=true
-ProtectSystem=strict
-ProtectHome=read-only
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectControlGroups=true
-RestrictSUIDSGID=true
-ReadWritePaths=%h/.tradingagents %h/trader/logs %h/trader/backups
 
 [Install]
 WantedBy=default.target
