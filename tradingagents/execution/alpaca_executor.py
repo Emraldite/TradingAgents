@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 from typing import Any
 from urllib.parse import urlparse
@@ -63,6 +64,39 @@ def _order_summary(order: dict[str, Any]) -> dict[str, Any]:
 def _marketable_limit_price(side: str, reference_price: float, slippage_bps: int = 20) -> float:
     multiplier = 1 + slippage_bps / 10_000 if side == "buy" else 1 - slippage_bps / 10_000
     return round(reference_price * multiplier, 2)
+
+
+def _broker_error_detail(response: Any) -> str:
+    """Return only Alpaca's documented error code/message, never headers or keys."""
+    if response is None:
+        return ""
+    try:
+        payload = response.json()
+    except Exception:
+        return "non-JSON broker response"
+    if not isinstance(payload, dict):
+        return "unrecognized broker error response"
+    code = str(payload.get("code", "unknown"))[:80]
+    message = str(payload.get("message", "unknown")).replace("\n", " ")[:500]
+    return f"code={code} message={message}"
+
+
+def _safe_order_fields(payload: dict[str, Any]) -> dict[str, Any]:
+    """Whitelist non-secret fields that are useful when Alpaca rejects an order."""
+    allowed = (
+        "symbol",
+        "side",
+        "type",
+        "time_in_force",
+        "order_class",
+        "qty",
+        "notional",
+        "limit_price",
+        "take_profit",
+        "stop_loss",
+        "client_order_id",
+    )
+    return {key: payload[key] for key in allowed if key in payload}
 
 
 class AlpacaExecutor:
@@ -311,7 +345,16 @@ class AlpacaExecutor:
             if recovered is not None:
                 logger.warning("Recovered accepted Alpaca order after submit error: %s", exc)
                 return recovered
-            logger.error("Order submission failed for %s: %s", payload.get("symbol"), exc)
+            response = getattr(exc, "response", None)
+            status = getattr(response, "status_code", "unknown")
+            detail = _broker_error_detail(response) or str(exc)
+            logger.error(
+                "Order submission failed for %s: status=%s detail=%s order=%s",
+                payload.get("symbol"),
+                status,
+                detail,
+                _safe_order_fields(payload),
+            )
             return None
 
     def execute_buy(
@@ -357,20 +400,44 @@ class AlpacaExecutor:
         take_profit_price: float,
         client_order_id: str,
     ) -> dict[str, Any] | None:
-        if min(limit_price, stop_price, take_profit_price) <= 0:
+        if dollar_amount <= 0 or min(limit_price, stop_price, take_profit_price) <= 0:
             logger.error("Bracket buy failed for %s: invalid price", ticker)
             return None
-        qty = round(dollar_amount / limit_price, 6)
+        entry = round(limit_price, 2)
+        stop = round(stop_price, 2)
+        target = round(take_profit_price, 2)
+        if stop >= entry or target <= entry:
+            logger.error(
+                "Bracket buy failed for %s: require stop < entry < target "
+                "(stop=%.2f entry=%.2f target=%.2f)",
+                ticker,
+                stop,
+                entry,
+                target,
+            )
+            return None
+
+        # Whole shares are the most portable choice for Alpaca advanced orders.
+        # Flooring also guarantees the order cannot exceed its dollar risk budget.
+        qty = math.floor(dollar_amount / entry)
+        if qty < 1:
+            logger.info(
+                "Bracket buy skipped for %s: $%.2f is below one share at $%.2f",
+                ticker,
+                dollar_amount,
+                entry,
+            )
+            return None
         payload = {
             "symbol": ticker,
             "qty": qty,
             "side": "buy",
             "type": "limit",
-            "limit_price": round(limit_price, 2),
+            "limit_price": entry,
             "time_in_force": "day",
             "order_class": "bracket",
-            "take_profit": {"limit_price": round(take_profit_price, 2)},
-            "stop_loss": {"stop_price": round(stop_price, 2)},
+            "take_profit": {"limit_price": target},
+            "stop_loss": {"stop_price": stop},
         }
         return self._submit_order(payload, client_order_id=client_order_id)
 

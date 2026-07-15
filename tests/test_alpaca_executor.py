@@ -1,3 +1,7 @@
+import logging
+
+import requests
+
 from tradingagents.execution.alpaca_executor import _order_summary, _to_float
 
 
@@ -207,9 +211,109 @@ def test_bracket_buy_contains_broker_side_stop_and_take_profit(monkeypatch):
 
     assert captured["order_class"] == "bracket"
     assert captured["client_order_id"] == "ta-buy-1"
+    assert captured["qty"] == 5
     assert captured["stop_loss"] == {"stop_price": 186}
     assert captured["take_profit"] == {"limit_price": 224}
     assert order["order_class"] == "bracket"
+
+
+def test_bracket_buy_floors_to_whole_shares(monkeypatch):
+    from tradingagents.execution import alpaca_executor
+
+    captured = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "id": "bracket-whole",
+                "symbol": "NVDA",
+                "side": "buy",
+                "type": "limit",
+                "order_class": "bracket",
+                "qty": "4",
+                "status": "accepted",
+                "filled_qty": "0",
+                "filled_avg_price": None,
+            }
+
+    executor = alpaca_executor.AlpacaExecutor()
+    monkeypatch.setattr(executor, "get_order_by_client_id", lambda value: None)
+    monkeypatch.setattr(
+        alpaca_executor.requests,
+        "post",
+        lambda *args, **kwargs: captured.update(kwargs["json"]) or Response(),
+    )
+
+    executor.execute_buy_bracket("NVDA", 999, 200, 186, 224, "ta-buy-whole")
+
+    assert captured["qty"] == 4
+    assert isinstance(captured["qty"], int)
+    assert captured["qty"] * captured["limit_price"] <= 999
+
+
+def test_bracket_buy_rejects_invalid_prices_before_submission(monkeypatch):
+    from tradingagents.execution import alpaca_executor
+
+    called = False
+
+    def fake_post(*args, **kwargs):
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(alpaca_executor.requests, "post", fake_post)
+
+    order = alpaca_executor.AlpacaExecutor().execute_buy_bracket(
+        "NVDA", 1000, 200, 201, 224, "ta-buy-invalid"
+    )
+
+    assert order is None
+    assert called is False
+
+
+def test_bracket_buy_skips_when_budget_is_less_than_one_share(monkeypatch):
+    from tradingagents.execution import alpaca_executor
+
+    called = False
+
+    def fake_post(*args, **kwargs):
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(alpaca_executor.requests, "post", fake_post)
+
+    order = alpaca_executor.AlpacaExecutor().execute_buy_bracket(
+        "NVDA", 199, 200, 186, 224, "ta-buy-too-small"
+    )
+
+    assert order is None
+    assert called is False
+
+
+def test_rejected_order_logs_safe_alpaca_message(monkeypatch, caplog):
+    from tradingagents.execution import alpaca_executor
+
+    response = requests.Response()
+    response.status_code = 422
+    response._content = b'{"code":42210000,"message":"qty must be integer"}'
+    response.url = "https://paper-api.alpaca.markets/v2/orders"
+
+    executor = alpaca_executor.AlpacaExecutor()
+    monkeypatch.setattr(executor, "get_order_by_client_id", lambda value: None)
+    monkeypatch.setattr(alpaca_executor.requests, "post", lambda *args, **kwargs: response)
+
+    with caplog.at_level(logging.ERROR):
+        order = executor.execute_buy_bracket(
+            "NVDA", 1000, 200, 186, 224, "ta-buy-rejected"
+        )
+
+    assert order is None
+    assert "status=422" in caplog.text
+    assert "code=42210000 message=qty must be integer" in caplog.text
+    assert "APCA-API-KEY-ID" not in caplog.text
+    assert "APCA-API-SECRET-KEY" not in caplog.text
 
 
 def test_submit_recovers_existing_order_after_timeout(monkeypatch):
