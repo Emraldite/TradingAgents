@@ -324,3 +324,30 @@ def test_protective_order_rejection_is_audited_as_critical(monkeypatch):
     assert created == 0
     assert decisions[0]["decision"] == "native-stop-failed"
     assert events[0][0:2] == ("critical", "protective_orders")
+
+
+def test_bracket_parent_is_temporary_protection_when_legs_are_omitted():
+    from tradingagents.scheduler.runner import _entry_protection_id
+
+    assert _entry_protection_id(
+        {
+            "order_id": "bracket-parent",
+            "order_class": "bracket",
+            "legs": [],
+        }
+    ) == "bracket-parent"
+
+
+def test_stop_leg_replaces_bracket_parent_as_protection_id():
+    from tradingagents.scheduler.runner import _entry_protection_id
+
+    assert _entry_protection_id(
+        {
+            "order_id": "bracket-parent",
+            "order_class": "bracket",
+            "legs": [
+                {"order_id": "take-profit", "type": "limit"},
+                {"order_id": "native-stop", "type": "stop"},
+            ],
+        }
+    ) == "native-stop"

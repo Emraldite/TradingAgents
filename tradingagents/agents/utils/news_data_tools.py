@@ -23,8 +23,14 @@ def get_news(
 @tool
 def get_global_news(
     curr_date: Annotated[str, "Current date in yyyy-mm-dd format"],
-    look_back_days: Annotated[Optional[int], "Days to look back; omit to use the configured default"] = None,
-    limit: Annotated[Optional[int], "Max articles to return; omit to use the configured default"] = None,
+    look_back_days: Annotated[
+        Optional[int | str],
+        "Positive integer or numeric string; omit to use the configured default",
+    ] = None,
+    limit: Annotated[
+        Optional[int | str],
+        "Positive integer or numeric string; omit to use the configured default",
+    ] = None,
 ) -> str:
     """
     Retrieve global news data.
@@ -40,7 +46,16 @@ def get_global_news(
     Returns:
         str: A formatted string containing global news data
     """
-    return route_to_vendor("get_global_news", curr_date, look_back_days, limit)
+    try:
+        days = None if look_back_days is None else int(look_back_days)
+        article_limit = None if limit is None else int(limit)
+    except (TypeError, ValueError):
+        return "Invalid global-news limits; expected positive integers"
+    if (days is not None and days <= 0) or (
+        article_limit is not None and article_limit <= 0
+    ):
+        return "Invalid global-news limits; expected positive integers"
+    return route_to_vendor("get_global_news", curr_date, days, article_limit)
 
 @tool
 def get_insider_transactions(

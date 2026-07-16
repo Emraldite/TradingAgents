@@ -216,7 +216,8 @@ def test_terminal_order_and_cumulative_fill_cannot_regress(tmp_path):
         store.record_order_update(dict(filled, status="accepted"), "paper")
 
 
-def test_reconcile_clears_canceled_stop_and_requires_replacement(tmp_path):
+@pytest.mark.parametrize("mode", ["live", "paper", "real"])
+def test_reconcile_clears_canceled_stop_and_requires_replacement(tmp_path, mode):
     store = StrategyStateStore(tmp_path / "state.db")
     buy = {
         "order_id": "buy-filled",
@@ -240,11 +241,11 @@ def test_reconcile_clears_canceled_stop_and_requires_replacement(tmp_path):
     }
     broker_position = {"ticker": "AAPL", "qty": 10, "cost_basis": 1000}
 
-    store.reconcile_broker_state([broker_position], [buy, active_stop], "live")
+    store.reconcile_broker_state([broker_position], [buy, active_stop], mode)
     assert store.positions_needing_stop_orders() == []
 
     canceled_stop = dict(active_stop, status="canceled")
-    store.reconcile_broker_state([broker_position], [buy, canceled_stop], "live")
+    store.reconcile_broker_state([broker_position], [buy, canceled_stop], mode)
     assert store.positions_needing_stop_orders()[0]["ticker"] == "AAPL"
 
 

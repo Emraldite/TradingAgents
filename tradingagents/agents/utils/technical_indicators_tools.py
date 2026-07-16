@@ -7,7 +7,9 @@ def get_indicators(
     symbol: Annotated[str, "ticker symbol of the company"],
     indicator: Annotated[str, "technical indicator to get the analysis and report of"],
     curr_date: Annotated[str, "The current trading date you are trading on, YYYY-mm-dd"],
-    look_back_days: Annotated[int, "how many days to look back"] = 30,
+    look_back_days: Annotated[
+        int | str, "positive integer or numeric string for how many days to look back"
+    ] = 30,
 ) -> str:
     """
     Retrieve a single technical indicator for a given ticker symbol.
@@ -22,11 +24,18 @@ def get_indicators(
     """
     # LLMs sometimes pass multiple indicators as a comma-separated string;
     # split and process each individually.
+    try:
+        days = int(look_back_days)
+    except (TypeError, ValueError):
+        return f"Invalid look_back_days: {look_back_days!r}; expected a positive integer"
+    if days <= 0:
+        return f"Invalid look_back_days: {look_back_days!r}; expected a positive integer"
+
     indicators = [i.strip().lower() for i in indicator.split(",") if i.strip()]
     results = []
     for ind in indicators:
         try:
-            results.append(route_to_vendor("get_indicators", symbol, ind, curr_date, look_back_days))
+            results.append(route_to_vendor("get_indicators", symbol, ind, curr_date, days))
         except ValueError as e:
             results.append(str(e))
     return "\n\n".join(results)

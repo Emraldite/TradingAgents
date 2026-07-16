@@ -93,7 +93,7 @@ Fill in `GROQ_API_KEY`, `ALPACA_API_KEY`, and `ALPACA_SECRET_KEY`. Leave
 their defaults. Never commit `.env`.
 
 Use a Groq account that remains on its free plan. The scheduler accepts only the
-checked-in Groq model in automated cycles, limits the whole graph to six requests
+checked-in Groq model in automated cycles, limits the whole graph to three requests
 per minute, and allows one client retry. It never changes providers or models
 after a quota error, and provider failures produce zero orders. These safeguards
 prevent accidental fallback to a paid model, but Groq controls its plans and

@@ -10,8 +10,15 @@ def get_verified_market_snapshot(
     symbol: Annotated[str, "ticker symbol of the company"],
     curr_date: Annotated[str, "the current trading date, YYYY-mm-dd"],
     look_back_days: Annotated[
-        int, "number of recent trading rows to include for sanity-checking"
+        int | str,
+        "positive integer or numeric string for recent rows to sanity-check",
     ] = 30,
 ) -> str:
     """Return a deterministic market-data snapshot for exact price claims."""
-    return build_verified_market_snapshot(symbol, curr_date, look_back_days)
+    try:
+        days = int(look_back_days)
+    except (TypeError, ValueError):
+        return f"Invalid look_back_days: {look_back_days!r}; expected a positive integer"
+    if days <= 0:
+        return f"Invalid look_back_days: {look_back_days!r}; expected a positive integer"
+    return build_verified_market_snapshot(symbol, curr_date, days)

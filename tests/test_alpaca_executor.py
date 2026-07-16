@@ -212,6 +212,7 @@ def test_bracket_buy_contains_broker_side_stop_and_take_profit(monkeypatch):
     assert captured["order_class"] == "bracket"
     assert captured["client_order_id"] == "ta-buy-1"
     assert captured["qty"] == 5
+    assert captured["time_in_force"] == "gtc"
     assert captured["stop_loss"] == {"stop_price": 186}
     assert captured["take_profit"] == {"limit_price": 224}
     assert order["order_class"] == "bracket"

@@ -49,7 +49,7 @@ def test_groq_provider_kwargs_are_conservative_and_validated():
     graph = object.__new__(TradingAgentsGraph)
     graph.config = {
         "llm_provider": "groq",
-        "groq_requests_per_minute": 6,
+        "groq_requests_per_minute": 3,
         "groq_max_retries": 1,
     }
 
@@ -61,7 +61,7 @@ def test_groq_provider_kwargs_are_conservative_and_validated():
 
 @pytest.mark.parametrize(
     "rpm,retries,message",
-    [(0, 1, "must be positive"), (6, -1, "cannot be negative")],
+    [(0, 1, "must be positive"), (3, -1, "cannot be negative")],
 )
 def test_groq_provider_kwargs_reject_invalid_limits(rpm, retries, message):
     graph = object.__new__(TradingAgentsGraph)

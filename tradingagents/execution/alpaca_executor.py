@@ -434,7 +434,7 @@ class AlpacaExecutor:
             "side": "buy",
             "type": "limit",
             "limit_price": entry,
-            "time_in_force": "day",
+            "time_in_force": "gtc",
             "order_class": "bracket",
             "take_profit": {"limit_price": target},
             "stop_loss": {"stop_price": stop},

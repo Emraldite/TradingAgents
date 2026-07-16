@@ -154,7 +154,7 @@ class TradingAgentsGraph:
             from langchain_core.rate_limiters import InMemoryRateLimiter
 
             requests_per_minute = int(
-                self.config.get("groq_requests_per_minute", 6)
+                self.config.get("groq_requests_per_minute", 3)
             )
             max_retries = int(self.config.get("groq_max_retries", 1))
             if requests_per_minute <= 0:

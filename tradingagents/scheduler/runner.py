@@ -804,6 +804,15 @@ def _stop_leg_id(order: dict) -> str | None:
     return None
 
 
+def _entry_protection_id(order: dict) -> str | None:
+    stop_id = _stop_leg_id(order)
+    if stop_id:
+        return stop_id
+    if order.get("order_class") == "bracket" and order.get("order_id"):
+        return str(order["order_id"])
+    return None
+
+
 def _scorecard_fields(gate: ScorecardGate) -> dict:
     return {
         "scorecard_status": gate.status,
@@ -1376,7 +1385,16 @@ def run_cycle(
                 (int(item["position_id"]) for item in updates if item.get("position_id")),
                 0,
             )
-            protection_id = _stop_leg_id(order)
+            protection_id = _entry_protection_id(order)
+            if protection_id == str(order.get("order_id")):
+                # Alpaca may omit held child legs from the immediate POST response.
+                # An accepted bracket parent is temporary proof of native protection;
+                # the next broker reconciliation replaces it with the active stop ID.
+                logger.info(
+                    "Using accepted bracket %s as temporary protection proof for %s",
+                    protection_id,
+                    ticker,
+                )
             if position_id and protection_id:
                 state_store.set_stop_order(position_id, protection_id)
             orders_submitted += 1

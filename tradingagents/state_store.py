@@ -1148,7 +1148,7 @@ class StrategyStateStore:
                         (now, now, row["id"]),
                     )
 
-            if mode == "live":
+            if mode in {"live", "paper", "real"}:
                 conn.execute(
                     """UPDATE strategy_positions SET stop_order_id=NULL, updated_at=?
                        WHERE status IN ('open', 'broker_only')""",
