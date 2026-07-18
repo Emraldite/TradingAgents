@@ -6,6 +6,11 @@ import pytest
 from tradingagents.scheduler import runner
 
 
+@pytest.fixture(autouse=True)
+def isolate_scheduler_runtime(monkeypatch, tmp_path):
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "data_cache_dir", str(tmp_path))
+
+
 class _FakeJob:
     def __init__(self):
         self.weekday = None
