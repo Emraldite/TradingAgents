@@ -170,6 +170,36 @@ def test_unfilled_live_order_does_not_create_position_or_trade(tmp_path):
     assert store.reserved_open_position_count() == 1
 
 
+def test_async_bracket_fill_retains_parent_as_protection(tmp_path):
+    store = StrategyStateStore(tmp_path / "state.db")
+    accepted = {
+        "order_id": "bracket-parent",
+        "ticker": "MSFT",
+        "side": "buy",
+        "type": "limit",
+        "order_class": "bracket",
+        "status": "accepted",
+        "qty": 1,
+        "limit_price": 400,
+        "filled_qty": 0,
+        "filled_avg_price": 0,
+    }
+    store.record_order_update(accepted, "paper")
+
+    filled = dict(
+        accepted,
+        status="filled",
+        filled_qty=1,
+        filled_avg_price=400,
+    )
+    del filled["order_class"]
+    result = store.record_order_update(filled, "paper")
+
+    assert result["fill_delta"] == 1
+    assert store.active_positions()[0]["stop_order_id"] == "bracket-parent"
+    assert store.positions_needing_stop_orders() == []
+
+
 def test_order_updates_apply_only_incremental_fill_quantity(tmp_path):
     store = StrategyStateStore(tmp_path / "state.db")
     order = {

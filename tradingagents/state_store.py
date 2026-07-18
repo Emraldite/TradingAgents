@@ -316,12 +316,18 @@ class StrategyStateStore:
 
         with self._connect() as conn:
             previous = conn.execute(
-                "SELECT filled_qty, filled_avg_price, status FROM strategy_orders WHERE order_id=?",
+                """SELECT filled_qty, filled_avg_price, status, order_class
+                   FROM strategy_orders WHERE order_id=?""",
                 (order_id,),
             ).fetchone()
             previous_qty = float(previous["filled_qty"] or 0) if previous else 0.0
             previous_avg = float(previous["filled_avg_price"] or 0) if previous else 0.0
             previous_status = str(previous["status"] or "") if previous else ""
+            order_class = str(
+                order.get("order_class")
+                or (previous["order_class"] if previous else "")
+                or ""
+            )
             if previous:
                 if filled_qty + 1e-9 < previous_qty:
                     raise ValueError(
@@ -360,7 +366,7 @@ class StrategyStateStore:
                     order["ticker"],
                     order.get("side", ""),
                     order.get("type", order.get("order_type", "")),
-                    order.get("order_class", ""),
+                    order_class,
                     order.get("parent_order_id"),
                     status,
                     float(order.get("qty", 0) or 0),
@@ -414,6 +420,7 @@ class StrategyStateStore:
                 )
 
                 if order.get("side") == "buy":
+                    bracket_protection_id = order_id if order_class == "bracket" else None
                     row = conn.execute(
                         """SELECT id FROM strategy_positions
                            WHERE order_id=? AND status IN ('open', 'pending', 'broker_only')
@@ -425,13 +432,16 @@ class StrategyStateStore:
                         conn.execute(
                             """UPDATE strategy_positions
                                SET entry_date=COALESCE(entry_date, ?), entry_price=?,
-                                   quantity=?, broker_quantity=?, status='open', updated_at=?
+                                   quantity=?, broker_quantity=?, status='open',
+                                   stop_order_id=COALESCE(NULLIF(stop_order_id, ''), ?),
+                                   updated_at=?
                                WHERE id=?""",
                             (
                                 order.get("filled_at") or now,
                                 filled_avg_price or fill_price,
                                 filled_qty,
                                 filled_qty,
+                                bracket_protection_id,
                                 now,
                                 position_id,
                             ),
@@ -440,8 +450,8 @@ class StrategyStateStore:
                         cur = conn.execute(
                             """INSERT INTO strategy_positions (
                                 ticker, entry_date, entry_price, quantity, broker_quantity,
-                                order_id, status, mode, created_at, updated_at
-                            ) VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)""",
+                                order_id, stop_order_id, status, mode, created_at, updated_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)""",
                             (
                                 order["ticker"],
                                 order.get("filled_at") or now,
@@ -449,6 +459,7 @@ class StrategyStateStore:
                                 filled_qty,
                                 filled_qty,
                                 order_id,
+                                bracket_protection_id,
                                 mode,
                                 now,
                                 now,
