@@ -34,7 +34,7 @@ them separately only if needed, and keep a backup before replacing local state.
 
 ### Current verified state (2026-07-20)
 
-- Last recorded full verification: 364 tests passed and 1 optional live-API test
+- Last recorded full verification: 367 tests passed and 1 optional live-API test
   was skipped. Run the suite again after cloning because this is a recorded
   checkpoint, not a guarantee about a new environment.
 - Groq GPT-OSS 20B/120B is the free hosted provider. Live calls require your
@@ -102,6 +102,8 @@ budget more reliably. Provider failures fail the ticker and produce zero orders;
 there is no automatic paid or trial-provider fallback. NVIDIA NIM remains a manual
 prototype option because its hosted endpoint is governed as a trial service, not a
 dependable production endpoint. Gemini and Ollama remain manual alternatives.
+GPT-OSS manager decisions use JSON Schema mode so Groq does not interpret their
+structured responses as callable tools.
 The insider analyst reads official SEC Form 4 XML, keeps only open-market purchase
 and sale codes, discounts planned sales, excludes amendments, awards/options/gifts/tax events,
 and treats missing SEC data as neutral. Its report is supporting evidence in the

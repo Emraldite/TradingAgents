@@ -3,10 +3,18 @@ from unittest.mock import patch
 import pytest
 
 from tradingagents.graph.trading_graph import TradingAgentsGraph
+from tradingagents.llm_clients.capabilities import get_capabilities
 from tradingagents.llm_clients.openai_client import OpenAIClient
 
 
 MODEL = "openai/gpt-oss-20b"
+
+
+@pytest.mark.parametrize(
+    "model", ["openai/gpt-oss-20b", "openai/gpt-oss-120b", "gpt-oss-120b"]
+)
+def test_gpt_oss_uses_json_schema_instead_of_schema_tool_calls(model):
+    assert get_capabilities(model).preferred_structured_method == "json_schema"
 
 
 @patch("tradingagents.llm_clients.openai_client.NormalizedChatOpenAI")
