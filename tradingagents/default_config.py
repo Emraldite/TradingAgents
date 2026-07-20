@@ -11,10 +11,17 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_LLM_PROVIDER":         "llm_provider",
     "TRADINGAGENTS_DEEP_THINK_LLM":       "deep_think_llm",
     "TRADINGAGENTS_QUICK_THINK_LLM":      "quick_think_llm",
+    "TRADINGAGENTS_SECONDARY_LLM_PROVIDER": "secondary_llm_provider",
+    "TRADINGAGENTS_SECONDARY_DEEP_THINK_LLM": "secondary_deep_think_llm",
+    "TRADINGAGENTS_SECONDARY_QUICK_THINK_LLM": "secondary_quick_think_llm",
     "TRADINGAGENTS_LLM_BACKEND_URL":      "backend_url",
     "TRADINGAGENTS_GOOGLE_THINKING_LEVEL": "google_thinking_level",
     "TRADINGAGENTS_GROQ_REQUESTS_PER_MINUTE": "groq_requests_per_minute",
+    "TRADINGAGENTS_GROQ_MAX_OUTPUT_TOKENS": "groq_max_output_tokens",
     "TRADINGAGENTS_GROQ_MAX_RETRIES":     "groq_max_retries",
+    "TRADINGAGENTS_CEREBRAS_REQUESTS_PER_MINUTE": "cerebras_requests_per_minute",
+    "TRADINGAGENTS_CEREBRAS_MAX_OUTPUT_TOKENS": "cerebras_max_output_tokens",
+    "TRADINGAGENTS_CEREBRAS_MAX_RETRIES": "cerebras_max_retries",
     "TRADINGAGENTS_OUTPUT_LANGUAGE":      "output_language",
     "TRADINGAGENTS_MAX_DEBATE_ROUNDS":    "max_debate_rounds",
     "TRADINGAGENTS_MAX_RISK_ROUNDS":      "max_risk_discuss_rounds",
@@ -96,9 +103,12 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # Pending entries are never pruned. None disables rotation entirely.
     "memory_log_max_entries": None,
     # LLM settings
-    "llm_provider": "groq",
-    "deep_think_llm": "openai/gpt-oss-120b",
-    "quick_think_llm": "openai/gpt-oss-20b",
+    "llm_provider": "cerebras",
+    "deep_think_llm": "gpt-oss-120b",
+    "quick_think_llm": "gpt-oss-120b",
+    "secondary_llm_provider": "groq",
+    "secondary_deep_think_llm": "openai/gpt-oss-120b",
+    "secondary_quick_think_llm": "openai/gpt-oss-20b",
     # When None, each provider's client falls back to its own default endpoint
     # (api.openai.com for OpenAI, generativelanguage.googleapis.com for Gemini, ...).
     # The CLI overrides this per provider when the user picks one. Keeping a
@@ -108,7 +118,11 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # Provider-specific thinking configuration
     "google_thinking_level": None,      # "high", "minimal", etc.
     "groq_requests_per_minute": 1,
+    "groq_max_output_tokens": 1024,
     "groq_max_retries": 1,
+    "cerebras_requests_per_minute": 3,
+    "cerebras_max_output_tokens": 1024,
+    "cerebras_max_retries": 1,
     "openai_reasoning_effort": None,    # "medium", "high", "low"
     "anthropic_effort": None,           # "high", "medium", "low"
     # Checkpoint/resume: when True, LangGraph saves state after each node

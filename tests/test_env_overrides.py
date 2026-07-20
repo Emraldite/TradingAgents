@@ -20,10 +20,17 @@ def _reload_with_env(monkeypatch, **overrides):
 
 def test_no_env_uses_built_in_defaults(monkeypatch):
     dc = _reload_with_env(monkeypatch)
-    assert dc.DEFAULT_CONFIG["llm_provider"] == "groq"
-    assert dc.DEFAULT_CONFIG["deep_think_llm"] == "openai/gpt-oss-120b"
-    assert dc.DEFAULT_CONFIG["quick_think_llm"] == "openai/gpt-oss-20b"
+    assert dc.DEFAULT_CONFIG["llm_provider"] == "cerebras"
+    assert dc.DEFAULT_CONFIG["deep_think_llm"] == "gpt-oss-120b"
+    assert dc.DEFAULT_CONFIG["quick_think_llm"] == "gpt-oss-120b"
+    assert dc.DEFAULT_CONFIG["secondary_llm_provider"] == "groq"
+    assert dc.DEFAULT_CONFIG["secondary_deep_think_llm"] == "openai/gpt-oss-120b"
+    assert dc.DEFAULT_CONFIG["secondary_quick_think_llm"] == "openai/gpt-oss-20b"
+    assert dc.DEFAULT_CONFIG["cerebras_requests_per_minute"] == 3
+    assert dc.DEFAULT_CONFIG["cerebras_max_output_tokens"] == 1024
+    assert dc.DEFAULT_CONFIG["cerebras_max_retries"] == 1
     assert dc.DEFAULT_CONFIG["groq_requests_per_minute"] == 1
+    assert dc.DEFAULT_CONFIG["groq_max_output_tokens"] == 1024
     assert dc.DEFAULT_CONFIG["groq_max_retries"] == 1
     assert dc.DEFAULT_CONFIG["backend_url"] is None
     assert dc.DEFAULT_CONFIG["max_debate_rounds"] == 1
@@ -36,12 +43,14 @@ def test_string_overrides(monkeypatch):
         TRADINGAGENTS_LLM_PROVIDER="google",
         TRADINGAGENTS_DEEP_THINK_LLM="gemini-3-pro-preview",
         TRADINGAGENTS_QUICK_THINK_LLM="gemini-3-flash-preview",
+        TRADINGAGENTS_SECONDARY_LLM_PROVIDER="none",
         TRADINGAGENTS_LLM_BACKEND_URL="https://example.invalid/v1",
         TRADINGAGENTS_OUTPUT_LANGUAGE="Chinese",
     )
     assert dc.DEFAULT_CONFIG["llm_provider"] == "google"
     assert dc.DEFAULT_CONFIG["deep_think_llm"] == "gemini-3-pro-preview"
     assert dc.DEFAULT_CONFIG["quick_think_llm"] == "gemini-3-flash-preview"
+    assert dc.DEFAULT_CONFIG["secondary_llm_provider"] == "none"
     assert dc.DEFAULT_CONFIG["backend_url"] == "https://example.invalid/v1"
     assert dc.DEFAULT_CONFIG["output_language"] == "Chinese"
 
@@ -52,14 +61,22 @@ def test_int_coercion(monkeypatch):
         TRADINGAGENTS_MAX_DEBATE_ROUNDS="3",
         TRADINGAGENTS_MAX_RISK_ROUNDS="2",
         TRADINGAGENTS_GROQ_REQUESTS_PER_MINUTE="9",
+        TRADINGAGENTS_GROQ_MAX_OUTPUT_TOKENS="768",
         TRADINGAGENTS_GROQ_MAX_RETRIES="2",
+        TRADINGAGENTS_CEREBRAS_REQUESTS_PER_MINUTE="4",
+        TRADINGAGENTS_CEREBRAS_MAX_OUTPUT_TOKENS="900",
+        TRADINGAGENTS_CEREBRAS_MAX_RETRIES="0",
     )
     assert dc.DEFAULT_CONFIG["max_debate_rounds"] == 3
     assert isinstance(dc.DEFAULT_CONFIG["max_debate_rounds"], int)
     assert dc.DEFAULT_CONFIG["max_risk_discuss_rounds"] == 2
     assert isinstance(dc.DEFAULT_CONFIG["max_risk_discuss_rounds"], int)
     assert dc.DEFAULT_CONFIG["groq_requests_per_minute"] == 9
+    assert dc.DEFAULT_CONFIG["groq_max_output_tokens"] == 768
     assert dc.DEFAULT_CONFIG["groq_max_retries"] == 2
+    assert dc.DEFAULT_CONFIG["cerebras_requests_per_minute"] == 4
+    assert dc.DEFAULT_CONFIG["cerebras_max_output_tokens"] == 900
+    assert dc.DEFAULT_CONFIG["cerebras_max_retries"] == 0
 
 
 def test_scheduler_float_coercion(monkeypatch):
@@ -106,6 +123,19 @@ def test_bool_coercion(monkeypatch, raw, expected):
     assert dc.DEFAULT_CONFIG["checkpoint_enabled"] is expected
 
 
+def test_secondary_provider_overrides(monkeypatch):
+    dc = _reload_with_env(
+        monkeypatch,
+        TRADINGAGENTS_SECONDARY_LLM_PROVIDER="cerebras",
+        TRADINGAGENTS_SECONDARY_QUICK_THINK_LLM="gpt-oss-120b",
+        TRADINGAGENTS_SECONDARY_DEEP_THINK_LLM="gpt-oss-120b",
+    )
+
+    assert dc.DEFAULT_CONFIG["secondary_llm_provider"] == "cerebras"
+    assert dc.DEFAULT_CONFIG["secondary_quick_think_llm"] == "gpt-oss-120b"
+    assert dc.DEFAULT_CONFIG["secondary_deep_think_llm"] == "gpt-oss-120b"
+
+
 def test_empty_env_value_is_passthrough(monkeypatch):
     """Empty TRADINGAGENTS_* values must not clobber the built-in default."""
     dc = _reload_with_env(
@@ -113,7 +143,7 @@ def test_empty_env_value_is_passthrough(monkeypatch):
         TRADINGAGENTS_LLM_PROVIDER="",
         TRADINGAGENTS_MAX_DEBATE_ROUNDS="",
     )
-    assert dc.DEFAULT_CONFIG["llm_provider"] == "groq"
+    assert dc.DEFAULT_CONFIG["llm_provider"] == "cerebras"
     assert dc.DEFAULT_CONFIG["max_debate_rounds"] == 1
 
 

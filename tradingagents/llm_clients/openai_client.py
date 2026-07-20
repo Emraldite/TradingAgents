@@ -2,6 +2,7 @@ import os
 from typing import Any, Optional
 
 from langchain_core.messages import AIMessage
+from langchain_core.runnables import Runnable
 from langchain_openai import ChatOpenAI
 
 from .api_key_env import get_api_key_env
@@ -32,7 +33,7 @@ class NormalizedChatOpenAI(ChatOpenAI):
     def invoke(self, input, config=None, **kwargs):
         return normalize_content(super().invoke(input, config, **kwargs))
 
-    def with_structured_output(self, schema, *, method=None, **kwargs):
+    def with_structured_output(self, schema, *, method=None, **kwargs) -> Runnable:
         caps = get_capabilities(self.model_name)
         if caps.preferred_structured_method == "none":
             raise NotImplementedError(
@@ -138,7 +139,7 @@ class MinimaxChatOpenAI(NormalizedChatOpenAI):
 
 # Kwargs forwarded from user config to ChatOpenAI
 _PASSTHROUGH_KWARGS = (
-    "timeout", "max_retries", "reasoning_effort",
+    "timeout", "max_retries", "max_tokens", "reasoning_effort",
     "api_key", "callbacks", "http_client", "http_async_client", "rate_limiter",
 )
 
@@ -158,6 +159,7 @@ _PROVIDER_BASE_URL = {
     "minimax-cn": "https://api.minimaxi.com/v1",
     "openrouter": "https://openrouter.ai/api/v1",
     "groq":       "https://api.groq.com/openai/v1",
+    "cerebras":   "https://api.cerebras.ai/v1",
     "ollama":     "http://localhost:11434/v1",
 }
 

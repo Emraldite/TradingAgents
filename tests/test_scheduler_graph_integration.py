@@ -11,6 +11,7 @@ def free_gemini_config(monkeypatch):
     monkeypatch.setitem(runner.DEFAULT_CONFIG, "llm_provider", "google")
     monkeypatch.setitem(runner.DEFAULT_CONFIG, "quick_think_llm", "gemini-3.1-flash-lite")
     monkeypatch.setitem(runner.DEFAULT_CONFIG, "deep_think_llm", "gemini-3.5-flash")
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "secondary_llm_provider", "none")
 
 
 class FakeScorecard:

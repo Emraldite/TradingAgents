@@ -132,6 +132,14 @@ MODEL_OPTIONS: ProviderModeOptions = {
             ),
         ],
     },
+    "cerebras": {
+        "quick": [
+            ("GPT-OSS 120B - Free tier", "gpt-oss-120b"),
+        ],
+        "deep": [
+            ("GPT-OSS 120B - Free tier", "gpt-oss-120b"),
+        ],
+    },
     "xai": {
         "quick": [
             ("Grok 4.20 (Non-Reasoning) - Latest, speed-optimized", "grok-4.20-non-reasoning"),

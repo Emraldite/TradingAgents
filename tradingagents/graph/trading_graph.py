@@ -14,8 +14,40 @@ except (AttributeError, OSError):
     pass
 
 import yfinance as yf
+from langchain_core.callbacks import BaseCallbackHandler
+from openai import APIConnectionError, InternalServerError, RateLimitError
 
 logger = logging.getLogger(__name__)
+
+_RETRYABLE_PROVIDER_ERRORS = (
+    RateLimitError,
+    APIConnectionError,
+    InternalServerError,
+)
+
+
+def _with_retryable_fallback(primary, fallback):
+    return primary.with_fallbacks(
+        [fallback], exceptions_to_handle=_RETRYABLE_PROVIDER_ERRORS
+    )
+
+
+class _FallbackAuditCallback(BaseCallbackHandler):
+    def __init__(self, provider: str, completed: set[str]):
+        self.provider = provider
+        self.completed = completed
+
+    def on_chat_model_start(self, serialized, messages, **kwargs) -> None:
+        logger.warning(
+            "Primary LLM request failed; attempting %s fallback", self.provider
+        )
+
+    def on_llm_end(self, response, **kwargs) -> None:
+        self.completed.add(self.provider)
+        logger.warning("LLM fallback completed through %s", self.provider)
+
+    def on_llm_error(self, error, **kwargs) -> None:
+        logger.error("LLM fallback through %s failed: %s", self.provider, error)
 
 from langgraph.prebuilt import ToolNode
 
@@ -74,6 +106,7 @@ class TradingAgentsGraph:
         self.debug = debug
         self.config = config or DEFAULT_CONFIG
         self.callbacks = callbacks or []
+        self._fallback_providers_used: set[str] = set()
 
         # Update the interface's config
         set_config(self.config)
@@ -104,6 +137,49 @@ class TradingAgentsGraph:
 
         self.deep_thinking_llm = deep_client.get_llm()
         self.quick_thinking_llm = quick_client.get_llm()
+
+        secondary_provider = str(
+            self.config.get("secondary_llm_provider", "")
+        ).strip().lower()
+        primary_provider = str(self.config.get("llm_provider", "")).lower()
+        if secondary_provider in {"none", primary_provider}:
+            secondary_provider = ""
+        if secondary_provider:
+            if {primary_provider, secondary_provider} != {"groq", "cerebras"}:
+                raise ValueError(
+                    "Automatic failover currently supports only the Groq/Cerebras pair"
+                )
+            secondary_quick = str(
+                self.config.get("secondary_quick_think_llm", "")
+            ).strip()
+            secondary_deep = str(
+                self.config.get("secondary_deep_think_llm", "")
+            ).strip()
+            if not secondary_quick or not secondary_deep:
+                raise ValueError("Secondary quick and deep models cannot be empty")
+            fallback_kwargs = self._get_provider_kwargs(secondary_provider)
+            fallback_kwargs["callbacks"] = [
+                *self.callbacks,
+                _FallbackAuditCallback(
+                    secondary_provider, self._fallback_providers_used
+                ),
+            ]
+            fallback_deep_llm = create_llm_client(
+                provider=secondary_provider,
+                model=secondary_deep,
+                **fallback_kwargs,
+            ).get_llm()
+            fallback_quick_llm = create_llm_client(
+                provider=secondary_provider,
+                model=secondary_quick,
+                **fallback_kwargs,
+            ).get_llm()
+            self.deep_thinking_llm = _with_retryable_fallback(
+                self.deep_thinking_llm, fallback_deep_llm
+            )
+            self.quick_thinking_llm = _with_retryable_fallback(
+                self.quick_thinking_llm, fallback_quick_llm
+            )
         
         self.memory_log = TradingMemoryLog(self.config)
 
@@ -139,32 +215,48 @@ class TradingAgentsGraph:
         self.graph = self.workflow.compile()
         self._checkpointer_ctx = None
 
-    def _get_provider_kwargs(self) -> Dict[str, Any]:
+    def reset_llm_provider_audit(self) -> None:
+        self._fallback_providers_used.clear()
+
+    def llm_provider_audit_label(self) -> str:
+        primary = str(self.config.get("llm_provider", "unknown"))
+        if not self._fallback_providers_used:
+            return primary
+        return "+".join([primary, *sorted(self._fallback_providers_used)])
+
+    def _get_provider_kwargs(self, provider: str | None = None) -> Dict[str, Any]:
         """Get provider-specific kwargs for LLM client creation."""
         kwargs = {}
-        provider = self.config.get("llm_provider", "").lower()
+        provider = (provider or self.config.get("llm_provider", "")).lower()
 
         if provider == "google":
             thinking_level = self.config.get("google_thinking_level")
             if thinking_level:
                 kwargs["thinking_level"] = thinking_level
 
-        elif provider == "groq":
+        elif provider in {"groq", "cerebras"}:
             from langchain_core.rate_limiters import InMemoryRateLimiter
 
+            default_rpm = 1 if provider == "groq" else 3
             requests_per_minute = int(
-                self.config.get("groq_requests_per_minute", 3)
+                self.config.get(f"{provider}_requests_per_minute", default_rpm)
             )
-            max_retries = int(self.config.get("groq_max_retries", 1))
+            max_output_tokens = int(
+                self.config.get(f"{provider}_max_output_tokens", 1024)
+            )
+            max_retries = int(self.config.get(f"{provider}_max_retries", 1))
             if requests_per_minute <= 0:
-                raise ValueError("groq_requests_per_minute must be positive")
+                raise ValueError(f"{provider}_requests_per_minute must be positive")
+            if max_output_tokens <= 0:
+                raise ValueError(f"{provider}_max_output_tokens must be positive")
             if max_retries < 0:
-                raise ValueError("groq_max_retries cannot be negative")
+                raise ValueError(f"{provider}_max_retries cannot be negative")
             kwargs["rate_limiter"] = InMemoryRateLimiter(
                 requests_per_second=requests_per_minute / 60,
                 check_every_n_seconds=0.1,
                 max_bucket_size=1,
             )
+            kwargs["max_tokens"] = max_output_tokens
             kwargs["max_retries"] = max_retries
 
         elif provider == "openai":

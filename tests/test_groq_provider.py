@@ -37,11 +37,13 @@ def test_groq_forwards_shared_rate_limiter_and_retry_limit(mock_chat, monkeypatc
         MODEL,
         provider="groq",
         rate_limiter=limiter,
+        max_tokens=1024,
         max_retries=1,
     ).get_llm()
 
     kwargs = mock_chat.call_args.kwargs
     assert kwargs["rate_limiter"] is limiter
+    assert kwargs["max_tokens"] == 1024
     assert kwargs["max_retries"] == 1
 
 
@@ -50,24 +52,31 @@ def test_groq_provider_kwargs_are_conservative_and_validated():
     graph.config = {
         "llm_provider": "groq",
         "groq_requests_per_minute": 1,
+        "groq_max_output_tokens": 1024,
         "groq_max_retries": 1,
     }
 
     kwargs = graph._get_provider_kwargs()
 
     assert kwargs["max_retries"] == 1
+    assert kwargs["max_tokens"] == 1024
     assert kwargs["rate_limiter"] is not None
 
 
 @pytest.mark.parametrize(
-    "rpm,retries,message",
-    [(0, 1, "must be positive"), (3, -1, "cannot be negative")],
+    "rpm,max_tokens,retries,message",
+    [
+        (0, 1024, 1, "requests_per_minute must be positive"),
+        (1, 0, 1, "max_output_tokens must be positive"),
+        (1, 1024, -1, "max_retries cannot be negative"),
+    ],
 )
-def test_groq_provider_kwargs_reject_invalid_limits(rpm, retries, message):
+def test_groq_provider_kwargs_reject_invalid_limits(rpm, max_tokens, retries, message):
     graph = object.__new__(TradingAgentsGraph)
     graph.config = {
         "llm_provider": "groq",
         "groq_requests_per_minute": rpm,
+        "groq_max_output_tokens": max_tokens,
         "groq_max_retries": retries,
     }
 

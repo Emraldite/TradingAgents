@@ -98,7 +98,11 @@ def test_overweight_is_stronger_than_buy():
 def test_scorecard_key_separates_sec_insider_strategy_version():
     from tradingagents.scheduler import runner
 
-    assert runner.STRATEGY_IMPLEMENTATION_VERSION in runner._scorecard_strategy_key()
+    key = runner._scorecard_strategy_key()
+
+    assert runner.STRATEGY_IMPLEMENTATION_VERSION in key
+    assert "primary-" in key
+    assert "secondary-" in key
 
 
 def test_paper_mode_refuses_real_endpoint(monkeypatch):
@@ -200,6 +204,7 @@ def test_free_llm_guard_accepts_configured_gemini_models(monkeypatch):
     monkeypatch.setitem(runner.DEFAULT_CONFIG, "llm_provider", "google")
     monkeypatch.setitem(runner.DEFAULT_CONFIG, "quick_think_llm", "gemini-3.1-flash-lite")
     monkeypatch.setitem(runner.DEFAULT_CONFIG, "deep_think_llm", "gemini-3.5-flash")
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "secondary_llm_provider", "none")
 
     assert _validate_free_llm_config() is None
 
@@ -210,8 +215,48 @@ def test_free_llm_guard_accepts_configured_groq_model(monkeypatch):
     monkeypatch.setitem(runner.DEFAULT_CONFIG, "llm_provider", "groq")
     monkeypatch.setitem(runner.DEFAULT_CONFIG, "quick_think_llm", "openai/gpt-oss-20b")
     monkeypatch.setitem(runner.DEFAULT_CONFIG, "deep_think_llm", "openai/gpt-oss-120b")
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "secondary_llm_provider", "groq")
 
     assert _validate_free_llm_config() is None
+
+
+def test_free_llm_guard_accepts_cerebras_primary_groq_secondary(monkeypatch):
+    from tradingagents.scheduler import runner
+
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "llm_provider", "cerebras")
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "quick_think_llm", "gpt-oss-120b")
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "deep_think_llm", "gpt-oss-120b")
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "secondary_llm_provider", "groq")
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "secondary_quick_think_llm", "openai/gpt-oss-20b")
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "secondary_deep_think_llm", "openai/gpt-oss-120b")
+
+    assert _validate_free_llm_config() is None
+
+
+def test_free_llm_guard_accepts_reverse_provider_order(monkeypatch):
+    from tradingagents.scheduler import runner
+
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "llm_provider", "groq")
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "quick_think_llm", "openai/gpt-oss-20b")
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "deep_think_llm", "openai/gpt-oss-120b")
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "secondary_llm_provider", "cerebras")
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "secondary_quick_think_llm", "gpt-oss-120b")
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "secondary_deep_think_llm", "gpt-oss-120b")
+
+    assert _validate_free_llm_config() is None
+
+
+def test_free_llm_guard_rejects_unapproved_secondary_model(monkeypatch):
+    from tradingagents.scheduler import runner
+
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "llm_provider", "cerebras")
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "quick_think_llm", "gpt-oss-120b")
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "deep_think_llm", "gpt-oss-120b")
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "secondary_llm_provider", "groq")
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "secondary_quick_think_llm", "paid-model")
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "secondary_deep_think_llm", "openai/gpt-oss-120b")
+
+    assert "unapproved secondary Groq" in _validate_free_llm_config()
 
 
 def test_free_llm_guard_rejects_retired_groq_model(monkeypatch):

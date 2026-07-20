@@ -20,7 +20,7 @@ def test_every_select_llm_provider_choice_has_an_entry():
     # stay in lockstep. Region-specific keys (qwen-cn / minimax-cn / glm-cn)
     # are reached via the secondary region prompt, so they must also be present.
     expected = {
-        "openai", "google", "groq", "anthropic", "xai", "deepseek",
+        "openai", "google", "groq", "cerebras", "anthropic", "xai", "deepseek",
         "qwen", "qwen-cn",
         "glm", "glm-cn",
         "minimax", "minimax-cn",
@@ -36,6 +36,7 @@ def test_every_select_llm_provider_choice_has_an_entry():
         ("anthropic",  "ANTHROPIC_API_KEY"),
         ("google",     "GOOGLE_API_KEY"),
         ("groq",       "GROQ_API_KEY"),
+        ("cerebras",   "CEREBRAS_API_KEY"),
         ("azure",      "AZURE_OPENAI_API_KEY"),
         ("xai",        "XAI_API_KEY"),
         ("deepseek",   "DEEPSEEK_API_KEY"),
@@ -102,6 +103,7 @@ def test_ensure_api_key_prompts_and_writes_to_env(monkeypatch, tmp_path, cli_uti
     """When key is missing, user-pasted value must be written to .env AND os.environ."""
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").touch()
 
     fake_prompt = type("P", (), {"ask": staticmethod(lambda: "sk-deepseek-test")})()
     with patch.object(cli_utils.questionary, "password", return_value=fake_prompt):

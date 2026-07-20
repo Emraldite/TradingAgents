@@ -8,7 +8,7 @@ _OPENAI_COMPATIBLE = (
     "qwen", "qwen-cn",
     "glm", "glm-cn",
     "minimax", "minimax-cn",
-    "ollama", "openrouter", "groq",
+    "ollama", "openrouter", "groq", "cerebras",
 )
 
 

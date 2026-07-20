@@ -32,13 +32,14 @@ credentials through chat or commit them. Local `.agents/` notes, runtime SQLite
 databases, logs, and backups are intentionally not portable through Git; copy
 them separately only if needed, and keep a backup before replacing local state.
 
-### Current verified state (2026-07-19)
+### Current verified state (2026-07-20)
 
-- Last recorded full verification: 344 tests passed and 1 optional live-API test
+- Last recorded full verification: 363 tests passed and 1 optional live-API test
   was skipped. Run the suite again after cloning because this is a recorded
   checkpoint, not a guarantee about a new environment.
-- Groq with GPT-OSS 20B/120B is the free hosted default. A live call still requires
-  your own free-plan Groq key and cannot be verified by the offline test suite.
+- Cerebras GPT-OSS 120B is the free hosted primary, with Groq GPT-OSS
+  20B/120B as the secondary. Live calls require your own free-tier keys and
+  cannot be verified by the offline test suite.
 - The Oracle service omits user-systemd directives that caused exit
   `218/CAPABILITIES`, while retaining non-root execution, `NoNewPrivileges`, and
   `UMask=0077`.
@@ -49,7 +50,7 @@ them separately only if needed, and keep a backup before replacing local state.
 
 ## Free-first stack
 
-- Groq's free plan with GPT-OSS 20B for routine analysis and 120B for deep analysis
+- Cerebras GPT-OSS 120B as primary, with Groq GPT-OSS 20B/120B as secondary
 - Gemini's free API tier or local Ollama as manual alternatives
 - yfinance and public web sources for delayed/research data
 - Alpaca's free paper-trading account for execution testing
@@ -88,20 +89,25 @@ uv sync
 Copy-Item .env.example .env
 ```
 
-Fill in `GROQ_API_KEY`, `ALPACA_API_KEY`, and `ALPACA_SECRET_KEY`. Replace
+Fill in `GROQ_API_KEY`, `CEREBRAS_API_KEY`, `ALPACA_API_KEY`, and
+`ALPACA_SECRET_KEY`. Replace
 `TRADINGAGENTS_SEC_USER_AGENT` with an app identifier and your real contact email
 so SEC requests comply with fair-access policy. Leave
 `ALPACA_BASE_URL=https://paper-api.alpaca.markets` and all real-money locks at
 their defaults. Never commit `.env`.
 
-Use a Groq account that remains on its free plan. The scheduler accepts only the
-checked-in GPT-OSS models in automated cycles, limits the whole graph to one request
-per minute, and allows one client retry. Cycles are slower because the current free
-models have much lower token-per-minute limits. It never changes providers or models
-after a quota error, and provider failures produce zero orders. These safeguards
-prevent accidental fallback to a paid model, but Groq controls its plans and
-limits, so verify your account still has no billing enabled before each deployment.
-Gemini and Ollama remain manual alternatives rather than automatic fallbacks.
+Keep both provider accounts on their free tiers. The scheduler accepts only the
+checked-in GPT-OSS models, paces Cerebras at three requests per minute and Groq at
+one, caps completions at 1,024 tokens, and allows one client retry. The primary and
+secondary can be swapped through `.env`; set
+`TRADINGAGENTS_SECONDARY_LLM_PROVIDER=none` to disable automatic failover.
+Only a primary rate limit, timeout/connection failure, or 5xx error retries that
+individual request on the secondary; request/authentication/oversize errors do not.
+If both providers fail, the ticker fails and produces zero orders. These safeguards
+prevent fallback to a paid model, but each provider controls its plans and limits,
+so verify both accounts still have no billing enabled before each deployment.
+Gemini and Ollama remain manual alternatives. NVIDIA NIM is not used because its
+hosted access is an evaluation service with variable limits.
 The insider analyst reads official SEC Form 4 XML, keeps only open-market purchase
 and sale codes, discounts planned sales, excludes amendments, awards/options/gifts/tax events,
 and treats missing SEC data as neutral. Its report is supporting evidence in the

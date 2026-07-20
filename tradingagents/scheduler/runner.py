@@ -68,6 +68,12 @@ APPROVED_FREE_GOOGLE_MODELS = frozenset(
 APPROVED_FREE_GROQ_MODELS = frozenset(
     {"openai/gpt-oss-20b", "openai/gpt-oss-120b"}
 )
+APPROVED_FREE_CEREBRAS_MODELS = frozenset({"gpt-oss-120b"})
+APPROVED_FREE_HOSTED_MODELS = {
+    "google": APPROVED_FREE_GOOGLE_MODELS,
+    "groq": APPROVED_FREE_GROQ_MODELS,
+    "cerebras": APPROVED_FREE_CEREBRAS_MODELS,
+}
 
 TECHNICAL_SCREEN_TICKERS = [
     "AAPL",
@@ -120,28 +126,42 @@ LEVERAGED_ETFS = {
 def _validate_free_llm_config() -> str | None:
     """Reject paid or unknown hosted models in autonomous scheduler cycles."""
     provider = str(DEFAULT_CONFIG.get("llm_provider", "")).strip().lower()
-    if provider == "ollama":
+    secondary = str(
+        DEFAULT_CONFIG.get("secondary_llm_provider", "")
+    ).strip().lower()
+    if secondary in {"none", provider}:
+        secondary = ""
+    if provider == "ollama" and not secondary:
         return None
-    if provider not in {"google", "groq"}:
+    if provider not in APPROVED_FREE_HOSTED_MODELS:
         return (
             "Automated cycles require a zero-cost supported LLM provider "
-            "(google, groq, or ollama)"
+            "(google, groq, cerebras, or ollama)"
         )
 
     configured_models = {
         str(DEFAULT_CONFIG.get("quick_think_llm", "")).strip().lower(),
         str(DEFAULT_CONFIG.get("deep_think_llm", "")).strip().lower(),
     }
-    approved_models = (
-        APPROVED_FREE_GOOGLE_MODELS
-        if provider == "google"
-        else APPROVED_FREE_GROQ_MODELS
-    )
-    rejected = sorted(configured_models - approved_models)
+    rejected = sorted(configured_models - APPROVED_FREE_HOSTED_MODELS[provider])
     if rejected:
         return (
             f"Free-only mode rejected unapproved {provider.title()} model(s): "
             f"{', '.join(rejected)}"
+        )
+    if not secondary:
+        return None
+    if {provider, secondary} != {"groq", "cerebras"}:
+        return "Automatic failover supports only the free Groq/Cerebras pair"
+    secondary_models = {
+        str(DEFAULT_CONFIG.get("secondary_quick_think_llm", "")).strip().lower(),
+        str(DEFAULT_CONFIG.get("secondary_deep_think_llm", "")).strip().lower(),
+    }
+    rejected = sorted(secondary_models - APPROVED_FREE_HOSTED_MODELS[secondary])
+    if rejected:
+        return (
+            f"Free-only mode rejected unapproved secondary {secondary.title()} "
+            f"model(s): {', '.join(rejected)}"
         )
     return None
 
@@ -664,8 +684,8 @@ def _validate_broker_mode(
         return "Real mode refuses to use Alpaca's paper endpoint"
     if not bool(DEFAULT_CONFIG.get("allow_real_money", False)):
         return "TRADINGAGENTS_ALLOW_REAL_MONEY is not enabled"
-    if str(DEFAULT_CONFIG.get("llm_provider", "")).lower() not in {"google", "groq", "ollama"}:
-        return "Real mode requires a zero-cost supported LLM provider (google, groq, or ollama)"
+    if str(DEFAULT_CONFIG.get("llm_provider", "")).lower() not in {"google", "groq", "cerebras", "ollama"}:
+        return "Real mode requires a zero-cost supported LLM provider (google, groq, cerebras, or ollama)"
     expected_account = str(DEFAULT_CONFIG.get("expected_real_account_id", "")).strip()
     if not expected_account or expected_account != str(account.get("account_id", "")):
         return "Real Alpaca account ID does not match the configured expected account"
@@ -730,6 +750,7 @@ def _run_graph_analysis(
     ticker: str,
     trade_date: str,
 ) -> tuple[str, dict]:
+    graph.reset_llm_provider_audit()
     final_state, rating = graph.propagate(ticker, trade_date)
     return rating, {
         "market_report": final_state.get("market_report", ""),
@@ -738,6 +759,7 @@ def _run_graph_analysis(
         "news_report": final_state.get("news_report", ""),
         "fundamentals_report": final_state.get("fundamentals_report", ""),
         "final_trade_decision": final_state.get("final_trade_decision", ""),
+        "model_provider": graph.llm_provider_audit_label(),
     }
 
 
@@ -768,9 +790,27 @@ def _scorecard_strategy_key() -> str:
     provider = DEFAULT_CONFIG.get("llm_provider", "unknown")
     quick = DEFAULT_CONFIG.get("quick_think_llm", "unknown")
     deep = DEFAULT_CONFIG.get("deep_think_llm", "unknown")
+    output_cap = DEFAULT_CONFIG.get(f"{provider}_max_output_tokens", "default")
+    secondary = str(DEFAULT_CONFIG.get("secondary_llm_provider", "none"))
+    if secondary.lower() == str(provider).lower():
+        secondary = "none"
+    secondary_enabled = secondary.lower() not in {"", "none"}
+    secondary_quick = (
+        DEFAULT_CONFIG.get("secondary_quick_think_llm", "none")
+        if secondary_enabled else "none"
+    )
+    secondary_deep = (
+        DEFAULT_CONFIG.get("secondary_deep_think_llm", "none")
+        if secondary_enabled else "none"
+    )
+    secondary_cap = DEFAULT_CONFIG.get(
+        f"{secondary}_max_output_tokens", "default"
+    )
     return (
         f"full_graph:{STRATEGY_IMPLEMENTATION_VERSION}:{version}:"
-        f"{provider}:{quick}:{deep}"
+        f"primary-{provider}:{quick}:{deep}:max-output-{output_cap}:"
+        f"secondary-{secondary}:{secondary_quick}:{secondary_deep}:"
+        f"max-output-{secondary_cap}"
     )
 
 
@@ -1146,7 +1186,9 @@ def run_cycle(
                 ticker=ticker,
                 trade_date=trade_date,
                 rating=rating,
-                model_provider=DEFAULT_CONFIG.get("llm_provider"),
+                model_provider=analysis.get(
+                    "model_provider", DEFAULT_CONFIG.get("llm_provider")
+                ),
                 quick_model=DEFAULT_CONFIG.get("quick_think_llm"),
                 deep_model=DEFAULT_CONFIG.get("deep_think_llm"),
                 mode=execution_mode,

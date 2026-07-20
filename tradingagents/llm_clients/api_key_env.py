@@ -19,6 +19,7 @@ PROVIDER_API_KEY_ENV: dict[str, Optional[str]] = {
     "anthropic":  "ANTHROPIC_API_KEY",
     "google":     "GOOGLE_API_KEY",
     "groq":       "GROQ_API_KEY",
+    "cerebras":   "CEREBRAS_API_KEY",
     "azure":      "AZURE_OPENAI_API_KEY",
     "xai":        "XAI_API_KEY",
     "deepseek":   "DEEPSEEK_API_KEY",
