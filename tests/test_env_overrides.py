@@ -82,12 +82,16 @@ def test_data_collection_overrides(monkeypatch):
     dc = _reload_with_env(
         monkeypatch,
         TRADINGAGENTS_NEWS_ARTICLE_LIMIT="12",
-        TRADINGAGENTS_CONGRESSIONAL_LOOKBACK_DAYS="30",
-        TRADINGAGENTS_CONGRESSIONAL_CACHE_HOURS="2",
+        TRADINGAGENTS_SEC_USER_AGENT="TradingAgents test@example.org",
+        TRADINGAGENTS_INSIDER_LOOKBACK_DAYS="30",
+        TRADINGAGENTS_INSIDER_CACHE_HOURS="2",
+        TRADINGAGENTS_INSIDER_MAX_FILINGS="15",
     )
     assert dc.DEFAULT_CONFIG["news_article_limit"] == 12
-    assert dc.DEFAULT_CONFIG["congressional_lookback_days"] == 30
-    assert dc.DEFAULT_CONFIG["congressional_cache_hours"] == 2
+    assert dc.DEFAULT_CONFIG["sec_user_agent"] == "TradingAgents test@example.org"
+    assert dc.DEFAULT_CONFIG["insider_lookback_days"] == 30
+    assert dc.DEFAULT_CONFIG["insider_cache_hours"] == 2
+    assert dc.DEFAULT_CONFIG["insider_max_filings"] == 15
 
 
 @pytest.mark.parametrize(

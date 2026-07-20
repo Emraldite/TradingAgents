@@ -23,6 +23,8 @@ RELEASE_CONFIG_KEYS = (
     "llm_provider",
     "quick_think_llm",
     "deep_think_llm",
+    "insider_lookback_days",
+    "insider_max_filings",
     "scheduler_buy_position_pct",
     "scheduler_overweight_position_pct",
     "scheduler_max_position_pct",

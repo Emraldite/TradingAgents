@@ -47,7 +47,6 @@ def _price_frame() -> pd.DataFrame:
 
 
 def test_run_cycle_skips_when_graph_rating_is_hold(monkeypatch):
-    monkeypatch.setattr(runner, "get_conviction_watchlist", lambda **kwargs: pd.DataFrame())
     monkeypatch.setattr(runner, "_create_analysis_graph", lambda: object())
     monkeypatch.setattr(runner, "_create_scorecard", lambda: FakeScorecard())
     monkeypatch.setattr(
@@ -74,7 +73,6 @@ def test_run_cycle_skips_when_graph_rating_is_hold(monkeypatch):
 
 
 def test_run_cycle_uses_graph_buy_rating_for_entry(monkeypatch):
-    monkeypatch.setattr(runner, "get_conviction_watchlist", lambda **kwargs: pd.DataFrame())
     monkeypatch.setattr(runner, "_create_analysis_graph", lambda: object())
     monkeypatch.setattr(runner, "_create_scorecard", lambda: FakeScorecard(allowed_position_pct=0.02))
     monkeypatch.setattr(
@@ -102,7 +100,6 @@ def test_run_cycle_uses_graph_buy_rating_for_entry(monkeypatch):
 
 
 def test_run_cycle_applies_scorecard_warmup_cap(monkeypatch):
-    monkeypatch.setattr(runner, "get_conviction_watchlist", lambda **kwargs: pd.DataFrame())
     monkeypatch.setattr(runner, "_create_analysis_graph", lambda: object())
     monkeypatch.setattr(runner, "_create_scorecard", lambda: FakeScorecard(allowed_position_pct=0.005))
     monkeypatch.setattr(
@@ -133,7 +130,6 @@ def test_graph_provider_failure_marks_cycle_failed_instead_of_complete(
 ):
     store = StrategyStateStore(tmp_path / "state.db")
     monkeypatch.setattr(runner, "state_store", store)
-    monkeypatch.setattr(runner, "get_conviction_watchlist", lambda **kwargs: pd.DataFrame())
     monkeypatch.setattr(runner, "_create_analysis_graph", lambda: object())
     monkeypatch.setattr(runner, "_create_scorecard", lambda: FakeScorecard())
     monkeypatch.setattr(
@@ -167,11 +163,6 @@ def test_unapproved_model_fails_before_data_or_graph(monkeypatch, tmp_path):
     monkeypatch.setitem(runner.DEFAULT_CONFIG, "deep_think_llm", "gemini-3.1-pro-preview")
     monkeypatch.setattr(
         runner,
-        "get_conviction_watchlist",
-        lambda **kwargs: pytest.fail("data collection should not start"),
-    )
-    monkeypatch.setattr(
-        runner,
         "_create_analysis_graph",
         lambda: pytest.fail("graph should not be created"),
     )
@@ -192,7 +183,6 @@ def test_paper_cycle_prices_from_iex_and_does_not_count_unfilled_as_execution(
     store = StrategyStateStore(tmp_path / "state.db")
     captured = {}
     monkeypatch.setattr(runner, "state_store", store)
-    monkeypatch.setattr(runner, "get_conviction_watchlist", lambda **kwargs: pd.DataFrame())
     monkeypatch.setattr(runner, "_create_analysis_graph", lambda: object())
     monkeypatch.setattr(
         runner, "_create_scorecard", lambda: FakeScorecard(allowed_position_pct=0.02)

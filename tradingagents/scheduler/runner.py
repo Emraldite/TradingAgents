@@ -11,7 +11,6 @@ from typing import Literal
 import yfinance as yf
 
 from tradingagents.alerts import AlertManager
-from tradingagents.dataflows.congressional_data import get_conviction_watchlist
 from tradingagents.dataflows.manipulation_detector import detect_manipulation
 from tradingagents.execution.alpaca_executor import AlpacaExecutor
 from tradingagents.execution.order_monitor import OrderUpdateMonitor
@@ -54,7 +53,8 @@ MANIPULATION_SELL_THRESHOLD = float(
 LIMIT_SLIPPAGE_BPS = int(DEFAULT_CONFIG.get("limit_slippage_bps", 20))
 SHADOW_SLIPPAGE_BPS = int(DEFAULT_CONFIG.get("shadow_slippage_bps", 10))
 MAX_UNIVERSE_SIZE = 20
-GRAPH_ANALYSTS = ["congressional", "market", "social", "news", "fundamentals"]
+GRAPH_ANALYSTS = ["insider", "market", "social", "news", "fundamentals"]
+STRATEGY_IMPLEMENTATION_VERSION = "sec-insider-v2"
 GRAPH_BUY_RATINGS = {"Buy", "Overweight"}
 STRATEGY_RULES = strategy_rules_from_config(DEFAULT_CONFIG)
 APPROVED_FREE_GOOGLE_MODELS = frozenset(
@@ -628,25 +628,6 @@ def _normalize_tickers(tickers: list[str]) -> list[str]:
     return normalized
 
 
-def _select_target_tickers(
-    requested_tickers: list[str] | None,
-    watchlist_tickers: list[str],
-    allow_manual_tickers: bool = True,
-) -> tuple[list[str], list[str]]:
-    watchlist_tickers = _normalize_tickers(watchlist_tickers)
-    if not requested_tickers:
-        return watchlist_tickers, []
-
-    requested = _normalize_tickers(requested_tickers)
-    if allow_manual_tickers:
-        return requested, []
-
-    allowed = set(watchlist_tickers)
-    target_tickers = [ticker for ticker in requested if ticker in allowed]
-    skipped_tickers = [ticker for ticker in requested if ticker not in allowed]
-    return target_tickers, skipped_tickers
-
-
 def _resolve_mode(mode: str | None, dry_run: bool) -> ExecutionMode:
     if mode is None:
         return "dry-run" if dry_run else "paper"
@@ -752,7 +733,7 @@ def _run_graph_analysis(
     final_state, rating = graph.propagate(ticker, trade_date)
     return rating, {
         "market_report": final_state.get("market_report", ""),
-        "congressional_report": final_state.get("congressional_report", ""),
+        "insider_report": final_state.get("insider_report", ""),
         "sentiment_report": final_state.get("sentiment_report", ""),
         "news_report": final_state.get("news_report", ""),
         "fundamentals_report": final_state.get("fundamentals_report", ""),
@@ -787,7 +768,10 @@ def _scorecard_strategy_key() -> str:
     provider = DEFAULT_CONFIG.get("llm_provider", "unknown")
     quick = DEFAULT_CONFIG.get("quick_think_llm", "unknown")
     deep = DEFAULT_CONFIG.get("deep_think_llm", "unknown")
-    return f"full_graph:{version}:{provider}:{quick}:{deep}"
+    return (
+        f"full_graph:{STRATEGY_IMPLEMENTATION_VERSION}:{version}:"
+        f"{provider}:{quick}:{deep}"
+    )
 
 
 def _client_order_id(action: str, ticker: str, trade_date: str, context: str) -> str:
@@ -825,25 +809,12 @@ def _scorecard_fields(gate: ScorecardGate) -> dict:
 
 def run_cycle(
     tickers: list[str] | None = None,
-    min_conviction: int | None = None,
-    lookback_days: int | None = None,
     dry_run: bool = True,
-    allow_manual_tickers: bool = True,
     mode: str | None = None,
     real_money_confirmation: str | None = None,
 ):
     cycle_start = time.time()
     execution_mode = _resolve_mode(mode, dry_run)
-    min_conviction = int(
-        min_conviction
-        if min_conviction is not None
-        else DEFAULT_CONFIG.get("congressional_min_conviction_score", 6)
-    )
-    lookback_days = int(
-        lookback_days
-        if lookback_days is not None
-        else DEFAULT_CONFIG.get("congressional_lookback_days", 45)
-    )
     logger.info(
         "Cycle starting at %s (mode=%s)",
         datetime.now().isoformat(),
@@ -884,25 +855,10 @@ def run_cycle(
                 "clock": clock,
             }
 
-    watchlist = get_conviction_watchlist(
-        lookback_days=lookback_days, min_score=min_conviction
-    )
-    watchlist_tickers = (
-        watchlist["ticker"].unique().tolist() if not watchlist.empty else []
-    )
     if tickers:
-        target_tickers, skipped_tickers = _select_target_tickers(
-            tickers,
-            watchlist_tickers,
-            allow_manual_tickers=allow_manual_tickers,
-        )
+        target_tickers = _normalize_tickers(tickers)
     else:
-        target_tickers, skipped_tickers = _build_dynamic_universe(watchlist_tickers), []
-    if skipped_tickers:
-        logger.info(
-            "Manual ticker(s) not on conviction watchlist skipped: %s",
-            ", ".join(skipped_tickers),
-        )
+        target_tickers = _build_dynamic_universe([])
 
     cycle_id: int | None = None
     decisions: list[dict] = []
@@ -917,12 +873,6 @@ def run_cycle(
     graph = _create_analysis_graph()
     scorecard = _create_scorecard()
     scorecard_strategy_key = _scorecard_strategy_key()
-    if not watchlist_tickers:
-        state_store.record_health_event(
-            "warning",
-            "congressional_data",
-            "Congressional watchlist was empty; continuing only because it is an optional signal",
-        )
     try:
         scorecard.resolve_due_outcomes()
     except Exception as exc:
@@ -1514,7 +1464,6 @@ def start_scheduler(
     dry_run: bool = True,
     mode: str | None = None,
     tickers: list[str] | None = None,
-    allow_manual_tickers: bool = True,
     run_immediately: bool = True,
     daily_at: str = "08:45",
     timezone_name: str = "America/Chicago",
@@ -1540,7 +1489,6 @@ def start_scheduler(
                 tickers=tickers,
                 dry_run=(execution_mode == "dry-run"),
                 mode=execution_mode,
-                allow_manual_tickers=allow_manual_tickers,
                 real_money_confirmation=real_money_confirmation,
             )
         except Exception as exc:

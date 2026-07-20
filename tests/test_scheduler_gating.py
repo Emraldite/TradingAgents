@@ -10,7 +10,7 @@ from tradingagents.scheduler.runner import (
     _position_pct_for_rating,
     _portfolio_value_for_mode,
     _resolve_mode,
-    _select_target_tickers,
+    _normalize_tickers,
     _shadow_fill_price,
     _trading_days_between,
     _validate_broker_mode,
@@ -80,32 +80,8 @@ def test_broker_modes_fail_closed_without_account_value():
     assert _portfolio_value_for_mode("live", {"portfolio_value": 25_000}) == 25_000.0
 
 
-def test_no_manual_tickers_uses_watchlist():
-    targets, skipped = _select_target_tickers(None, ["AAPL", "MSFT"])
-
-    assert targets == ["AAPL", "MSFT"]
-    assert skipped == []
-
-
-def test_manual_tickers_are_filtered_to_watchlist_by_default():
-    targets, skipped = _select_target_tickers(
-        ["aapl", "tsla"],
-        ["AAPL"],
-        allow_manual_tickers=False,
-    )
-
-    assert targets == ["AAPL"]
-    assert skipped == ["TSLA"]
-
-
-def test_manual_ticker_bypass_is_default():
-    targets, skipped = _select_target_tickers(
-        ["aapl", "tsla"],
-        ["MSFT"],
-    )
-
-    assert targets == ["AAPL", "TSLA"]
-    assert skipped == []
+def test_manual_tickers_are_normalized_without_external_gating():
+    assert _normalize_tickers(["aapl", "tsla", "AAPL"]) == ["AAPL", "TSLA"]
 
 
 def test_resolve_mode_preserves_old_dry_run_flag():
@@ -117,6 +93,12 @@ def test_resolve_mode_preserves_old_dry_run_flag():
 
 def test_overweight_is_stronger_than_buy():
     assert _position_pct_for_rating("Overweight") > _position_pct_for_rating("Buy")
+
+
+def test_scorecard_key_separates_sec_insider_strategy_version():
+    from tradingagents.scheduler import runner
+
+    assert runner.STRATEGY_IMPLEMENTATION_VERSION in runner._scorecard_strategy_key()
 
 
 def test_paper_mode_refuses_real_endpoint(monkeypatch):

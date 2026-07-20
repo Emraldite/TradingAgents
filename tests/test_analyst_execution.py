@@ -45,6 +45,13 @@ class AnalystExecutionPlanTests(unittest.TestCase):
         self.assertEqual(spec.agent_node, "Sentiment Analyst")
         self.assertEqual(spec.report_key, "sentiment_report")
 
+    def test_insider_key_uses_sec_report_metadata(self):
+        plan = build_analyst_execution_plan(["insider"])
+        spec = plan.specs[0]
+        self.assertEqual(spec.agent_node, "Insider Analyst")
+        self.assertEqual(spec.tool_node, "tools_insider")
+        self.assertEqual(spec.report_key, "insider_report")
+
 
 class AnalystWallTimeTrackerTests(unittest.TestCase):
     def test_records_wall_time_when_analyst_completes(self):

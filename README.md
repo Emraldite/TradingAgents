@@ -1,7 +1,7 @@
 # TradingAgents Extended
 
 An AI-assisted swing-trading research and execution system. It collects market,
-news, social, fundamental, and congressional-trading signals; asks a multi-agent
+news, social, fundamental, and official SEC Form 4 insider signals; asks a multi-agent
 analysis graph for a rating; applies deterministic risk rules; and can submit
 Alpaca orders.
 
@@ -32,9 +32,9 @@ credentials through chat or commit them. Local `.agents/` notes, runtime SQLite
 databases, logs, and backups are intentionally not portable through Git; copy
 them separately only if needed, and keep a backup before replacing local state.
 
-### Current verified state (2026-07-14)
+### Current verified state (2026-07-19)
 
-- Last recorded full verification: 327 tests passed and 1 optional live-API test
+- Last recorded full verification: 343 tests passed and 1 optional live-API test
   was skipped. Run the suite again after cloning because this is a recorded
   checkpoint, not a guarantee about a new environment.
 - Groq with Llama 4 Scout is the free hosted default. A live call still requires
@@ -62,7 +62,7 @@ can still create costs.
 
 ## How a cycle works
 
-1. Select a small ticker universe from explicit tickers or congressional signals.
+1. Select a small ticker universe from explicit tickers or the technical screen.
 2. Reject missing/stale prices and unavailable manipulation data in broker modes.
 3. Run the analyst graph and store its versioned Buy, Overweight, Hold,
    Underweight, or Sell rating.
@@ -88,7 +88,9 @@ uv sync
 Copy-Item .env.example .env
 ```
 
-Fill in `GROQ_API_KEY`, `ALPACA_API_KEY`, and `ALPACA_SECRET_KEY`. Leave
+Fill in `GROQ_API_KEY`, `ALPACA_API_KEY`, and `ALPACA_SECRET_KEY`. Replace
+`TRADINGAGENTS_SEC_USER_AGENT` with an app identifier and your real contact email
+so SEC requests comply with fair-access policy. Leave
 `ALPACA_BASE_URL=https://paper-api.alpaca.markets` and all real-money locks at
 their defaults. Never commit `.env`.
 
@@ -99,6 +101,10 @@ after a quota error, and provider failures produce zero orders. These safeguards
 prevent accidental fallback to a paid model, but Groq controls its plans and
 limits, so verify your account still has no billing enabled before each deployment.
 Gemini and Ollama remain manual alternatives rather than automatic fallbacks.
+The insider analyst reads official SEC Form 4 XML, keeps only open-market purchase
+and sale codes, discounts planned sales, excludes amendments, awards/options/gifts/tax events,
+and treats missing SEC data as neutral. Its report is supporting evidence in the
+bull/bear debate; deterministic risk code remains in control.
 Free Alpaca market
 data is [real-time IEX-only](https://docs.alpaca.markets/docs/about-market-data-api),
 so the bot rejects stale or unusually wide IEX quotes;

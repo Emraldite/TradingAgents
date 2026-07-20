@@ -71,6 +71,7 @@ class MessageBuffer:
 
     # Analyst name mapping
     ANALYST_MAPPING = {
+        "insider": "Insider Analyst",
         "market": "Market Analyst",
         "social": "Sentiment Analyst",
         "news": "News Analyst",
@@ -81,6 +82,7 @@ class MessageBuffer:
     # analyst_key: which analyst selection controls this section (None = always included)
     # finalizing_agent: which agent must be "completed" for this report to count as done
     REPORT_SECTIONS = {
+        "insider_report": ("insider", "Insider Analyst"),
         "market_report": ("market", "Market Analyst"),
         "sentiment_report": ("social", "Sentiment Analyst"),
         "news_report": ("news", "News Analyst"),
@@ -1748,24 +1750,6 @@ def run_cycle_command(
         "--tickers",
         help="Comma-separated ticker list. Manual tickers are allowed by default.",
     ),
-    allow_manual_tickers: bool = typer.Option(
-        True,
-        "--allow-manual-tickers/--no-allow-manual-tickers",
-        help="Allow manual tickers to trade even when they are not on the congressional watchlist.",
-    ),
-    min_conviction: int = typer.Option(
-        int(DEFAULT_CONFIG.get("congressional_min_conviction_score", 6)),
-        "--min-conviction",
-        min=1,
-        max=10,
-        help="Minimum congressional conviction score.",
-    ),
-    lookback_days: int = typer.Option(
-        int(DEFAULT_CONFIG.get("congressional_lookback_days", 45)),
-        "--lookback-days",
-        min=1,
-        help="Congressional disclosure lookback window.",
-    ),
     confirm_real_money: Optional[str] = typer.Option(
         None,
         "--confirm-real-money",
@@ -1778,9 +1762,6 @@ def run_cycle_command(
     try:
         summary = run_cycle(
             tickers=_parse_ticker_csv(tickers),
-            min_conviction=min_conviction,
-            lookback_days=lookback_days,
-            allow_manual_tickers=allow_manual_tickers,
             mode=mode,
             real_money_confirmation=confirm_real_money,
         )
@@ -1831,11 +1812,6 @@ def run_bot_command(
         "--tickers",
         help="Comma-separated ticker list. Manual tickers are allowed by default.",
     ),
-    allow_manual_tickers: bool = typer.Option(
-        True,
-        "--allow-manual-tickers/--no-allow-manual-tickers",
-        help="Allow manual tickers to trade even when they are not on the congressional watchlist.",
-    ),
     run_now: bool = typer.Option(
         True,
         "--run-now/--wait-first",
@@ -1868,7 +1844,6 @@ def run_bot_command(
             interval_minutes=interval,
             mode=mode,
             tickers=_parse_ticker_csv(tickers),
-            allow_manual_tickers=allow_manual_tickers,
             run_immediately=run_now,
             daily_at=daily_at,
             real_money_confirmation=confirm_real_money,

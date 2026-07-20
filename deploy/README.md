@@ -44,7 +44,10 @@ chmod 600 .env
 mkdir -p ~/.tradingagents ~/trader/logs ~/trader/backups
 ```
 
-Set the Groq and Alpaca **paper** keys. Keep all of these unchanged:
+Set the Groq and Alpaca **paper** keys. Also replace
+`TRADINGAGENTS_SEC_USER_AGENT` with an app identifier and a real contact email;
+the official SEC endpoints require that identity for fair automated access. Keep
+all of these unchanged:
 
 ```dotenv
 ALPACA_BASE_URL=https://paper-api.alpaca.markets

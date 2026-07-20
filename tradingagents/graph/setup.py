@@ -49,6 +49,7 @@ class GraphSetup:
 
         Args:
             selected_analysts (list): List of analyst types to include. Options are:
+                - "insider": SEC Form 4 insider analyst
                 - "market": Market analyst
                 - "social": Social media analyst
                 - "news": News analyst
@@ -61,7 +62,7 @@ class GraphSetup:
 
         analyst_factories = {
             "market": lambda: create_market_analyst(self.quick_thinking_llm),
-            "congressional": lambda: create_congressional_analyst(self.quick_thinking_llm),
+            "insider": lambda: create_insider_analyst(self.quick_thinking_llm),
             "social": lambda: create_sentiment_analyst(self.quick_thinking_llm),
             "news": lambda: create_news_analyst(self.quick_thinking_llm),
             "fundamentals": lambda: create_fundamentals_analyst(self.quick_thinking_llm),

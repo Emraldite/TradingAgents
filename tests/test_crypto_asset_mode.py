@@ -14,8 +14,9 @@ class CryptoAssetModeTests(unittest.TestCase):
         self.assertEqual(detect_asset_type("AAPL"), AssetType.STOCK)
         self.assertEqual(detect_asset_type("SPY"), AssetType.STOCK)
 
-    def test_filters_out_fundamentals_analyst_for_crypto(self):
+    def test_filters_out_stock_only_analysts_for_crypto(self):
         analysts = [
+            AnalystType.INSIDER,
             AnalystType.MARKET,
             AnalystType.SOCIAL,
             AnalystType.NEWS,
@@ -33,6 +34,7 @@ class CryptoAssetModeTests(unittest.TestCase):
 
     def test_keeps_all_analysts_for_stock(self):
         analysts = [
+            AnalystType.INSIDER,
             AnalystType.MARKET,
             AnalystType.SOCIAL,
             AnalystType.NEWS,

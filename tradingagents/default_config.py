@@ -22,9 +22,10 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_NEWS_ARTICLE_LIMIT":   "news_article_limit",
     "TRADINGAGENTS_GLOBAL_NEWS_ARTICLE_LIMIT": "global_news_article_limit",
     "TRADINGAGENTS_GLOBAL_NEWS_LOOKBACK_DAYS": "global_news_lookback_days",
-    "TRADINGAGENTS_CONGRESSIONAL_LOOKBACK_DAYS": "congressional_lookback_days",
-    "TRADINGAGENTS_CONGRESSIONAL_MIN_CONVICTION_SCORE": "congressional_min_conviction_score",
-    "TRADINGAGENTS_CONGRESSIONAL_CACHE_HOURS": "congressional_cache_hours",
+    "TRADINGAGENTS_SEC_USER_AGENT": "sec_user_agent",
+    "TRADINGAGENTS_INSIDER_LOOKBACK_DAYS": "insider_lookback_days",
+    "TRADINGAGENTS_INSIDER_CACHE_HOURS": "insider_cache_hours",
+    "TRADINGAGENTS_INSIDER_MAX_FILINGS": "insider_max_filings",
     "TRADINGAGENTS_BENCHMARK_TICKER":     "benchmark_ticker",
     "TRADINGAGENTS_BUY_POSITION_PCT":     "scheduler_buy_position_pct",
     "TRADINGAGENTS_OVERWEIGHT_POSITION_PCT": "scheduler_overweight_position_pct",
@@ -127,11 +128,11 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "news_article_limit": 20,             # max articles per ticker (ticker-news)
     "global_news_article_limit": 10,      # max articles for global/macro news
     "global_news_lookback_days": 7,       # macro news lookback window
-    # Congressional trading agent settings
-    "congressional_lookback_days": 45,
-    "congressional_min_conviction_score": 6,
-    "committee_alignment_required": True,
-    "congressional_cache_hours": 6,
+    # Official SEC Form 4 corporate-insider data settings.
+    "sec_user_agent": "",
+    "insider_lookback_days": 30,
+    "insider_cache_hours": 12,
+    "insider_max_filings": 20,
     # Low-risk scheduler execution defaults. The graph decides direction; these
     # caps decide how much capital a single AI decision is allowed to touch.
     "scheduler_buy_position_pct": 0.01,
@@ -139,7 +140,7 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "scheduler_max_position_pct": 0.03,
     "scheduler_max_open_positions": 5,
     "scheduler_min_daily_volume": 500_000,
-    "strategy_version": "trader-v1",
+    "strategy_version": "trader-v2-sec-insider",
     "stop_loss_pct": -0.07,
     "take_profit_pct": 0.12,
     "max_hold_trading_days": 10,

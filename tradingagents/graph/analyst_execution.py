@@ -26,12 +26,12 @@ ANALYST_NODE_SPECS: Dict[str, AnalystNodeSpec] = {
         tool_node="tools_market",
         report_key="market_report",
     ),
-    "congressional": AnalystNodeSpec(
-        key="congressional",
-        agent_node="Congressional Analyst",
-        clear_node="Msg Clear Congressional",
-        tool_node="tools_congressional",
-        report_key="congressional_report",
+    "insider": AnalystNodeSpec(
+        key="insider",
+        agent_node="Insider Analyst",
+        clear_node="Msg Clear Insider",
+        tool_node="tools_insider",
+        report_key="insider_report",
     ),
     "social": AnalystNodeSpec(
         # Wire key stays "social" for saved-config back-compat; the
