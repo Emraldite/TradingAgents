@@ -34,10 +34,10 @@ them separately only if needed, and keep a backup before replacing local state.
 
 ### Current verified state (2026-07-19)
 
-- Last recorded full verification: 343 tests passed and 1 optional live-API test
+- Last recorded full verification: 344 tests passed and 1 optional live-API test
   was skipped. Run the suite again after cloning because this is a recorded
   checkpoint, not a guarantee about a new environment.
-- Groq with Llama 4 Scout is the free hosted default. A live call still requires
+- Groq with GPT-OSS 20B/120B is the free hosted default. A live call still requires
   your own free-plan Groq key and cannot be verified by the offline test suite.
 - The Oracle service omits user-systemd directives that caused exit
   `218/CAPABILITIES`, while retaining non-root execution, `NoNewPrivileges`, and
@@ -49,7 +49,7 @@ them separately only if needed, and keep a backup before replacing local state.
 
 ## Free-first stack
 
-- Groq's free developer tier with Llama 4 Scout for all analysis
+- Groq's free plan with GPT-OSS 20B for routine analysis and 120B for deep analysis
 - Gemini's free API tier or local Ollama as manual alternatives
 - yfinance and public web sources for delayed/research data
 - Alpaca's free paper-trading account for execution testing
@@ -95,8 +95,9 @@ so SEC requests comply with fair-access policy. Leave
 their defaults. Never commit `.env`.
 
 Use a Groq account that remains on its free plan. The scheduler accepts only the
-checked-in Groq model in automated cycles, limits the whole graph to three requests
-per minute, and allows one client retry. It never changes providers or models
+checked-in GPT-OSS models in automated cycles, limits the whole graph to one request
+per minute, and allows one client retry. Cycles are slower because the current free
+models have much lower token-per-minute limits. It never changes providers or models
 after a quota error, and provider failures produce zero orders. These safeguards
 prevent accidental fallback to a paid model, but Groq controls its plans and
 limits, so verify your account still has no billing enabled before each deployment.

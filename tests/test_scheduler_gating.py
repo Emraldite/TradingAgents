@@ -207,12 +207,22 @@ def test_free_llm_guard_accepts_configured_gemini_models(monkeypatch):
 def test_free_llm_guard_accepts_configured_groq_model(monkeypatch):
     from tradingagents.scheduler import runner
 
-    model = "meta-llama/llama-4-scout-17b-16e-instruct"
     monkeypatch.setitem(runner.DEFAULT_CONFIG, "llm_provider", "groq")
-    monkeypatch.setitem(runner.DEFAULT_CONFIG, "quick_think_llm", model)
-    monkeypatch.setitem(runner.DEFAULT_CONFIG, "deep_think_llm", model)
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "quick_think_llm", "openai/gpt-oss-20b")
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "deep_think_llm", "openai/gpt-oss-120b")
 
     assert _validate_free_llm_config() is None
+
+
+def test_free_llm_guard_rejects_retired_groq_model(monkeypatch):
+    from tradingagents.scheduler import runner
+
+    retired = "meta-llama/llama-4-scout-17b-16e-instruct"
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "llm_provider", "groq")
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "quick_think_llm", retired)
+    monkeypatch.setitem(runner.DEFAULT_CONFIG, "deep_think_llm", retired)
+
+    assert "unapproved Groq" in _validate_free_llm_config()
 
 
 def test_free_llm_guard_rejects_unapproved_groq_model(monkeypatch):

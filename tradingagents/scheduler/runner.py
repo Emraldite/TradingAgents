@@ -66,7 +66,7 @@ APPROVED_FREE_GOOGLE_MODELS = frozenset(
     }
 )
 APPROVED_FREE_GROQ_MODELS = frozenset(
-    {"meta-llama/llama-4-scout-17b-16e-instruct"}
+    {"openai/gpt-oss-20b", "openai/gpt-oss-120b"}
 )
 
 TECHNICAL_SCREEN_TICKERS = [

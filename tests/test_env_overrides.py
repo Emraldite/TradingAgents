@@ -21,9 +21,9 @@ def _reload_with_env(monkeypatch, **overrides):
 def test_no_env_uses_built_in_defaults(monkeypatch):
     dc = _reload_with_env(monkeypatch)
     assert dc.DEFAULT_CONFIG["llm_provider"] == "groq"
-    assert dc.DEFAULT_CONFIG["deep_think_llm"] == "meta-llama/llama-4-scout-17b-16e-instruct"
-    assert dc.DEFAULT_CONFIG["quick_think_llm"] == "meta-llama/llama-4-scout-17b-16e-instruct"
-    assert dc.DEFAULT_CONFIG["groq_requests_per_minute"] == 3
+    assert dc.DEFAULT_CONFIG["deep_think_llm"] == "openai/gpt-oss-120b"
+    assert dc.DEFAULT_CONFIG["quick_think_llm"] == "openai/gpt-oss-20b"
+    assert dc.DEFAULT_CONFIG["groq_requests_per_minute"] == 1
     assert dc.DEFAULT_CONFIG["groq_max_retries"] == 1
     assert dc.DEFAULT_CONFIG["backend_url"] is None
     assert dc.DEFAULT_CONFIG["max_debate_rounds"] == 1

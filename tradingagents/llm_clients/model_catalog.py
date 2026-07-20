@@ -121,14 +121,14 @@ MODEL_OPTIONS: ProviderModeOptions = {
     "groq": {
         "quick": [
             (
-                "Llama 4 Scout - Free, 128K context, high token allowance",
-                "meta-llama/llama-4-scout-17b-16e-instruct",
+                "GPT-OSS 20B - Free-plan routine analysis and tool use",
+                "openai/gpt-oss-20b",
             ),
         ],
         "deep": [
             (
-                "Llama 4 Scout - Free, tool use and structured output",
-                "meta-llama/llama-4-scout-17b-16e-instruct",
+                "GPT-OSS 120B - Free-plan deep reasoning and tool use",
+                "openai/gpt-oss-120b",
             ),
         ],
     },

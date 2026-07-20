@@ -97,8 +97,8 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "memory_log_max_entries": None,
     # LLM settings
     "llm_provider": "groq",
-    "deep_think_llm": "meta-llama/llama-4-scout-17b-16e-instruct",
-    "quick_think_llm": "meta-llama/llama-4-scout-17b-16e-instruct",
+    "deep_think_llm": "openai/gpt-oss-120b",
+    "quick_think_llm": "openai/gpt-oss-20b",
     # When None, each provider's client falls back to its own default endpoint
     # (api.openai.com for OpenAI, generativelanguage.googleapis.com for Gemini, ...).
     # The CLI overrides this per provider when the user picks one. Keeping a
@@ -107,7 +107,7 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "backend_url": None,
     # Provider-specific thinking configuration
     "google_thinking_level": None,      # "high", "minimal", etc.
-    "groq_requests_per_minute": 3,
+    "groq_requests_per_minute": 1,
     "groq_max_retries": 1,
     "openai_reasoning_effort": None,    # "medium", "high", "low"
     "anthropic_effort": None,           # "high", "medium", "low"

@@ -6,7 +6,7 @@ from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.llm_clients.openai_client import OpenAIClient
 
 
-MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+MODEL = "openai/gpt-oss-20b"
 
 
 @patch("tradingagents.llm_clients.openai_client.NormalizedChatOpenAI")
@@ -49,7 +49,7 @@ def test_groq_provider_kwargs_are_conservative_and_validated():
     graph = object.__new__(TradingAgentsGraph)
     graph.config = {
         "llm_provider": "groq",
-        "groq_requests_per_minute": 3,
+        "groq_requests_per_minute": 1,
         "groq_max_retries": 1,
     }
 
