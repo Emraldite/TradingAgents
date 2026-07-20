@@ -44,7 +44,7 @@ chmod 600 .env
 mkdir -p ~/.tradingagents ~/trader/logs ~/trader/backups
 ```
 
-Set the Groq, Cerebras, and Alpaca **paper** keys. Also replace
+Set the Groq and Alpaca **paper** keys. Also replace
 `TRADINGAGENTS_SEC_USER_AGENT` with an app identifier and a real contact email;
 the official SEC endpoints require that identity for fair automated access. Keep
 all of these unchanged:
@@ -58,28 +58,23 @@ TRADINGAGENTS_MAX_REAL_MONEY_NOTIONAL=0
 The checked-in free provider configuration is:
 
 ```dotenv
-TRADINGAGENTS_LLM_PROVIDER=cerebras
-TRADINGAGENTS_DEEP_THINK_LLM=gpt-oss-120b
-TRADINGAGENTS_QUICK_THINK_LLM=gpt-oss-120b
-TRADINGAGENTS_SECONDARY_LLM_PROVIDER=groq
-TRADINGAGENTS_SECONDARY_DEEP_THINK_LLM=openai/gpt-oss-120b
-TRADINGAGENTS_SECONDARY_QUICK_THINK_LLM=openai/gpt-oss-20b
-TRADINGAGENTS_CEREBRAS_REQUESTS_PER_MINUTE=3
-TRADINGAGENTS_CEREBRAS_MAX_OUTPUT_TOKENS=1024
-TRADINGAGENTS_CEREBRAS_MAX_RETRIES=1
+TRADINGAGENTS_LLM_PROVIDER=groq
+TRADINGAGENTS_DEEP_THINK_LLM=openai/gpt-oss-120b
+TRADINGAGENTS_QUICK_THINK_LLM=openai/gpt-oss-20b
+TRADINGAGENTS_SECONDARY_LLM_PROVIDER=none
 TRADINGAGENTS_GROQ_REQUESTS_PER_MINUTE=1
-TRADINGAGENTS_GROQ_MAX_OUTPUT_TOKENS=1024
+TRADINGAGENTS_GROQ_MAX_OUTPUT_TOKENS=512
 TRADINGAGENTS_GROQ_MAX_RETRIES=1
+TRADINGAGENTS_GROQ_REASONING_EFFORT=low
+TRADINGAGENTS_NEWS_ARTICLE_LIMIT=8
+TRADINGAGENTS_GLOBAL_NEWS_ARTICLE_LIMIT=5
 ```
 
-The scheduler rejects paid or unknown hosted models. A primary 429, timeout,
-connection failure, or 5xx error retries that request on the secondary; malformed,
-authentication, and oversized requests remain failed. If both providers fail, no
-order is produced. Each provider has one limiter shared across both model roles and
-all tickers. You may swap the two provider/model triplets or set
-`TRADINGAGENTS_SECONDARY_LLM_PROVIDER=none` to disable failover. Keep both accounts
-on their free tiers; if either provider changes its limits, stop the service and
-adjust only after checking the current limits and rerunning the test suite.
+The scheduler rejects paid or unknown hosted models and has no automatic provider
+fallback. One limiter paces both model roles and all tickers. Low reasoning effort,
+short completions, and smaller news inputs reduce free-tier token pressure. Keep the
+Groq account on its free tier; if its limits change, stop the service and adjust only
+after checking the current limits and rerunning the test suite.
 
 Never copy your local `.env` into GitHub. Transfer its values privately or create
 the VM file manually.
@@ -96,7 +91,7 @@ uv run tradingagents run-cycle --mode dry-run --tickers AAPL,MSFT,NVDA
 uv run tradingagents health
 ```
 
-Do not continue if the broker status points at a real-money endpoint, either LLM
+Do not continue if the broker status points at a real-money endpoint, the Groq
 account is not on its free tier, or the dry run reports
 configuration/data errors. Leave billing disabled; quota exhaustion should stop
 the bot rather than create a charge.

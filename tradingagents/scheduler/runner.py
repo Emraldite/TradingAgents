@@ -791,6 +791,13 @@ def _scorecard_strategy_key() -> str:
     quick = DEFAULT_CONFIG.get("quick_think_llm", "unknown")
     deep = DEFAULT_CONFIG.get("deep_think_llm", "unknown")
     output_cap = DEFAULT_CONFIG.get(f"{provider}_max_output_tokens", "default")
+    reasoning_effort = DEFAULT_CONFIG.get(
+        f"{provider}_reasoning_effort", "default"
+    )
+    news_limit = DEFAULT_CONFIG.get("news_article_limit", "default")
+    global_news_limit = DEFAULT_CONFIG.get(
+        "global_news_article_limit", "default"
+    )
     secondary = str(DEFAULT_CONFIG.get("secondary_llm_provider", "none"))
     if secondary.lower() == str(provider).lower():
         secondary = "none"
@@ -809,6 +816,7 @@ def _scorecard_strategy_key() -> str:
     return (
         f"full_graph:{STRATEGY_IMPLEMENTATION_VERSION}:{version}:"
         f"primary-{provider}:{quick}:{deep}:max-output-{output_cap}:"
+        f"reasoning-{reasoning_effort}:news-{news_limit}:{global_news_limit}:"
         f"secondary-{secondary}:{secondary_quick}:{secondary_deep}:"
         f"max-output-{secondary_cap}"
     )

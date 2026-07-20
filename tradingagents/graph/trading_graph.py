@@ -258,6 +258,15 @@ class TradingAgentsGraph:
             )
             kwargs["max_tokens"] = max_output_tokens
             kwargs["max_retries"] = max_retries
+            if provider == "groq":
+                reasoning_effort = str(
+                    self.config.get("groq_reasoning_effort", "low")
+                ).lower()
+                if reasoning_effort not in {"low", "medium", "high"}:
+                    raise ValueError(
+                        "groq_reasoning_effort must be low, medium, or high"
+                    )
+                kwargs["reasoning_effort"] = reasoning_effort
 
         elif provider == "openai":
             reasoning_effort = self.config.get("openai_reasoning_effort")

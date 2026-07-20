@@ -19,6 +19,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_GROQ_REQUESTS_PER_MINUTE": "groq_requests_per_minute",
     "TRADINGAGENTS_GROQ_MAX_OUTPUT_TOKENS": "groq_max_output_tokens",
     "TRADINGAGENTS_GROQ_MAX_RETRIES":     "groq_max_retries",
+    "TRADINGAGENTS_GROQ_REASONING_EFFORT": "groq_reasoning_effort",
     "TRADINGAGENTS_CEREBRAS_REQUESTS_PER_MINUTE": "cerebras_requests_per_minute",
     "TRADINGAGENTS_CEREBRAS_MAX_OUTPUT_TOKENS": "cerebras_max_output_tokens",
     "TRADINGAGENTS_CEREBRAS_MAX_RETRIES": "cerebras_max_retries",
@@ -103,12 +104,12 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # Pending entries are never pruned. None disables rotation entirely.
     "memory_log_max_entries": None,
     # LLM settings
-    "llm_provider": "cerebras",
-    "deep_think_llm": "gpt-oss-120b",
-    "quick_think_llm": "gpt-oss-120b",
-    "secondary_llm_provider": "groq",
-    "secondary_deep_think_llm": "openai/gpt-oss-120b",
-    "secondary_quick_think_llm": "openai/gpt-oss-20b",
+    "llm_provider": "groq",
+    "deep_think_llm": "openai/gpt-oss-120b",
+    "quick_think_llm": "openai/gpt-oss-20b",
+    "secondary_llm_provider": "none",
+    "secondary_deep_think_llm": "gpt-oss-120b",
+    "secondary_quick_think_llm": "gpt-oss-120b",
     # When None, each provider's client falls back to its own default endpoint
     # (api.openai.com for OpenAI, generativelanguage.googleapis.com for Gemini, ...).
     # The CLI overrides this per provider when the user picks one. Keeping a
@@ -118,8 +119,9 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # Provider-specific thinking configuration
     "google_thinking_level": None,      # "high", "minimal", etc.
     "groq_requests_per_minute": 1,
-    "groq_max_output_tokens": 1024,
+    "groq_max_output_tokens": 512,
     "groq_max_retries": 1,
+    "groq_reasoning_effort": "low",
     "cerebras_requests_per_minute": 3,
     "cerebras_max_output_tokens": 1024,
     "cerebras_max_retries": 1,
@@ -139,8 +141,8 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # News / data fetching parameters
     # Increase for longer lookback strategies or to broaden macro coverage;
     # decrease to reduce token usage in agent prompts.
-    "news_article_limit": 20,             # max articles per ticker (ticker-news)
-    "global_news_article_limit": 10,      # max articles for global/macro news
+    "news_article_limit": 8,              # max articles per ticker (ticker-news)
+    "global_news_article_limit": 5,       # max articles for global/macro news
     "global_news_lookback_days": 7,       # macro news lookback window
     # Official SEC Form 4 corporate-insider data settings.
     "sec_user_agent": "",

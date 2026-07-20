@@ -20,18 +20,21 @@ def _reload_with_env(monkeypatch, **overrides):
 
 def test_no_env_uses_built_in_defaults(monkeypatch):
     dc = _reload_with_env(monkeypatch)
-    assert dc.DEFAULT_CONFIG["llm_provider"] == "cerebras"
-    assert dc.DEFAULT_CONFIG["deep_think_llm"] == "gpt-oss-120b"
-    assert dc.DEFAULT_CONFIG["quick_think_llm"] == "gpt-oss-120b"
-    assert dc.DEFAULT_CONFIG["secondary_llm_provider"] == "groq"
-    assert dc.DEFAULT_CONFIG["secondary_deep_think_llm"] == "openai/gpt-oss-120b"
-    assert dc.DEFAULT_CONFIG["secondary_quick_think_llm"] == "openai/gpt-oss-20b"
+    assert dc.DEFAULT_CONFIG["llm_provider"] == "groq"
+    assert dc.DEFAULT_CONFIG["deep_think_llm"] == "openai/gpt-oss-120b"
+    assert dc.DEFAULT_CONFIG["quick_think_llm"] == "openai/gpt-oss-20b"
+    assert dc.DEFAULT_CONFIG["secondary_llm_provider"] == "none"
+    assert dc.DEFAULT_CONFIG["secondary_deep_think_llm"] == "gpt-oss-120b"
+    assert dc.DEFAULT_CONFIG["secondary_quick_think_llm"] == "gpt-oss-120b"
     assert dc.DEFAULT_CONFIG["cerebras_requests_per_minute"] == 3
     assert dc.DEFAULT_CONFIG["cerebras_max_output_tokens"] == 1024
     assert dc.DEFAULT_CONFIG["cerebras_max_retries"] == 1
     assert dc.DEFAULT_CONFIG["groq_requests_per_minute"] == 1
-    assert dc.DEFAULT_CONFIG["groq_max_output_tokens"] == 1024
+    assert dc.DEFAULT_CONFIG["groq_max_output_tokens"] == 512
     assert dc.DEFAULT_CONFIG["groq_max_retries"] == 1
+    assert dc.DEFAULT_CONFIG["groq_reasoning_effort"] == "low"
+    assert dc.DEFAULT_CONFIG["news_article_limit"] == 8
+    assert dc.DEFAULT_CONFIG["global_news_article_limit"] == 5
     assert dc.DEFAULT_CONFIG["backend_url"] is None
     assert dc.DEFAULT_CONFIG["max_debate_rounds"] == 1
     assert dc.DEFAULT_CONFIG["checkpoint_enabled"] is False
@@ -63,6 +66,7 @@ def test_int_coercion(monkeypatch):
         TRADINGAGENTS_GROQ_REQUESTS_PER_MINUTE="9",
         TRADINGAGENTS_GROQ_MAX_OUTPUT_TOKENS="768",
         TRADINGAGENTS_GROQ_MAX_RETRIES="2",
+        TRADINGAGENTS_GROQ_REASONING_EFFORT="high",
         TRADINGAGENTS_CEREBRAS_REQUESTS_PER_MINUTE="4",
         TRADINGAGENTS_CEREBRAS_MAX_OUTPUT_TOKENS="900",
         TRADINGAGENTS_CEREBRAS_MAX_RETRIES="0",
@@ -74,6 +78,7 @@ def test_int_coercion(monkeypatch):
     assert dc.DEFAULT_CONFIG["groq_requests_per_minute"] == 9
     assert dc.DEFAULT_CONFIG["groq_max_output_tokens"] == 768
     assert dc.DEFAULT_CONFIG["groq_max_retries"] == 2
+    assert dc.DEFAULT_CONFIG["groq_reasoning_effort"] == "high"
     assert dc.DEFAULT_CONFIG["cerebras_requests_per_minute"] == 4
     assert dc.DEFAULT_CONFIG["cerebras_max_output_tokens"] == 900
     assert dc.DEFAULT_CONFIG["cerebras_max_retries"] == 0
@@ -143,7 +148,7 @@ def test_empty_env_value_is_passthrough(monkeypatch):
         TRADINGAGENTS_LLM_PROVIDER="",
         TRADINGAGENTS_MAX_DEBATE_ROUNDS="",
     )
-    assert dc.DEFAULT_CONFIG["llm_provider"] == "cerebras"
+    assert dc.DEFAULT_CONFIG["llm_provider"] == "groq"
     assert dc.DEFAULT_CONFIG["max_debate_rounds"] == 1
 
 

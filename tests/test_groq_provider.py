@@ -37,13 +37,15 @@ def test_groq_forwards_shared_rate_limiter_and_retry_limit(mock_chat, monkeypatc
         MODEL,
         provider="groq",
         rate_limiter=limiter,
-        max_tokens=1024,
+        max_tokens=512,
+        reasoning_effort="low",
         max_retries=1,
     ).get_llm()
 
     kwargs = mock_chat.call_args.kwargs
     assert kwargs["rate_limiter"] is limiter
-    assert kwargs["max_tokens"] == 1024
+    assert kwargs["max_tokens"] == 512
+    assert kwargs["reasoning_effort"] == "low"
     assert kwargs["max_retries"] == 1
 
 
@@ -52,14 +54,16 @@ def test_groq_provider_kwargs_are_conservative_and_validated():
     graph.config = {
         "llm_provider": "groq",
         "groq_requests_per_minute": 1,
-        "groq_max_output_tokens": 1024,
+        "groq_max_output_tokens": 512,
         "groq_max_retries": 1,
+        "groq_reasoning_effort": "low",
     }
 
     kwargs = graph._get_provider_kwargs()
 
     assert kwargs["max_retries"] == 1
-    assert kwargs["max_tokens"] == 1024
+    assert kwargs["max_tokens"] == 512
+    assert kwargs["reasoning_effort"] == "low"
     assert kwargs["rate_limiter"] is not None
 
 
@@ -81,4 +85,18 @@ def test_groq_provider_kwargs_reject_invalid_limits(rpm, max_tokens, retries, me
     }
 
     with pytest.raises(ValueError, match=message):
+        graph._get_provider_kwargs()
+
+
+def test_groq_provider_kwargs_reject_invalid_reasoning_effort():
+    graph = object.__new__(TradingAgentsGraph)
+    graph.config = {
+        "llm_provider": "groq",
+        "groq_requests_per_minute": 1,
+        "groq_max_output_tokens": 512,
+        "groq_max_retries": 1,
+        "groq_reasoning_effort": "extreme",
+    }
+
+    with pytest.raises(ValueError, match="must be low, medium, or high"):
         graph._get_provider_kwargs()

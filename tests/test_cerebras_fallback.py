@@ -201,7 +201,9 @@ def test_graph_builds_configurable_primary_secondary_pair(
     assert [call["provider"] for call in calls] == [
         primary, primary, secondary, secondary
     ]
-    assert calls[-1]["max_tokens"] == 1024
+    assert calls[-1]["max_tokens"] == config[
+        f"{secondary}_max_output_tokens"
+    ]
     assert calls[-1]["max_retries"] == 1
     assert calls[0]["rate_limiter"] is calls[1]["rate_limiter"]
     assert calls[2]["rate_limiter"] is calls[3]["rate_limiter"]
