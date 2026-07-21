@@ -1400,6 +1400,30 @@ def _latest_price(ticker: str) -> float | None:
         return None
 
 
+def _benchmark_return_since(ticker: str, started_at: str | None) -> float | None:
+    if not started_at:
+        return None
+    try:
+        import yfinance as yf
+
+        start = datetime.datetime.fromisoformat(started_at).date().isoformat()
+        end = (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
+        data = yf.download(
+            ticker,
+            start=start,
+            end=end,
+            progress=False,
+            auto_adjust=True,
+            multi_level_index=False,
+        )
+        if data.empty or "Close" not in data or len(data["Close"].dropna()) < 2:
+            return None
+        close = data["Close"].dropna()
+        return (float(close.iloc[-1]) / float(close.iloc[0]) - 1) * 100
+    except Exception:
+        return None
+
+
 @app.command("strategy-status")
 def strategy_status(
     limit: int = typer.Option(
@@ -1629,6 +1653,10 @@ def health_command():
     last_cycle = health.get("last_cycle") or {}
     risk = health.get("risk") or {}
     performance = health.get("performance") or {}
+    benchmark = DEFAULT_CONFIG.get("benchmark_ticker") or "SPY"
+    benchmark_return = _benchmark_return_since(
+        benchmark, performance.get("first_equity_at")
+    )
     table.add_row("Last Cycle", str(last_cycle.get("completed_at") or last_cycle.get("started_at") or "never"))
     table.add_row("Last Cycle Status", str(last_cycle.get("status") or "unknown"))
     table.add_row("Last Reconciliation", str(health.get("last_reconciled_at") or "never"))
@@ -1639,6 +1667,59 @@ def health_command():
     table.add_row("Risk Reason", str(risk.get("halt_reason") or "none"))
     table.add_row("Confirmed Fills", str(performance.get("fill_count", 0)))
     table.add_row("Realized P&L", f"${float(performance.get('realized_pnl', 0)):,.2f}")
+    table.add_row("Days Tracked", str(performance.get("tracking_days") or "not enough data"))
+    account_return = performance.get("account_return_pct")
+    table.add_row(
+        "Whole Account Return",
+        f"{float(account_return):+.2f}%" if account_return is not None else "not enough data",
+    )
+    table.add_row(
+        f"{benchmark} Return (same dates)",
+        f"{benchmark_return:+.2f}%" if benchmark_return is not None else "market data unavailable",
+    )
+    table.add_row(
+        f"Whole Account Alpha vs {benchmark}",
+        f"{float(account_return) - benchmark_return:+.2f}%"
+        if account_return is not None and benchmark_return is not None
+        else "not enough data",
+    )
+    max_drawdown = performance.get("max_account_drawdown_pct")
+    table.add_row(
+        "Maximum Account Drawdown",
+        f"{float(max_drawdown):.2f}%" if max_drawdown is not None else "not enough data",
+    )
+    deployed = performance.get("capital_deployed_pct")
+    table.add_row(
+        "Capital Currently Deployed",
+        f"{float(deployed):.2f}%" if deployed is not None else "not enough data",
+    )
+    realized_return = performance.get("realized_return_on_capital_pct")
+    table.add_row(
+        "Closed-Trade Return on Capital",
+        f"{float(realized_return):+.2f}%" if realized_return is not None else "no closed trades",
+    )
+    closed_trades = int(performance.get("closed_trade_count", 0))
+    table.add_row("Closed Trades", str(closed_trades))
+    win_rate = performance.get("win_rate_pct")
+    table.add_row(
+        "Closed-Trade Win Rate",
+        f"{float(win_rate):.1f}%" if win_rate is not None else "no closed trades",
+    )
+    average_win = performance.get("average_win_pct")
+    table.add_row(
+        "Average Winner",
+        f"{float(average_win):+.2f}%" if average_win is not None else "no winners",
+    )
+    average_loss = performance.get("average_loss_pct")
+    table.add_row(
+        "Average Loser",
+        f"{float(average_loss):+.2f}%" if average_loss is not None else "no losses",
+    )
+    profit_factor = performance.get("profit_factor")
+    table.add_row(
+        "Profit Factor (gross)",
+        f"{float(profit_factor):.2f}" if profit_factor is not None else "needs a losing trade",
+    )
     console.print(table)
 
 

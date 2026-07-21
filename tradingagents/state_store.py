@@ -822,6 +822,13 @@ class StrategyStateStore:
                 """SELECT equity, timestamp FROM strategy_equity_snapshots
                    ORDER BY id DESC LIMIT 1"""
             ).fetchone()
+            first_equity = conn.execute(
+                """SELECT equity, timestamp FROM strategy_equity_snapshots
+                   ORDER BY id ASC LIMIT 1"""
+            ).fetchone()
+            equity_rows = conn.execute(
+                """SELECT equity FROM strategy_equity_snapshots ORDER BY id"""
+            ).fetchall()
             activity_fees = conn.execute(
                 """SELECT SUM(CASE WHEN net_amount < 0 THEN -net_amount ELSE 0 END) AS fees
                    FROM strategy_account_activities
@@ -830,7 +837,10 @@ class StrategyStateStore:
 
         inventory: dict[str, dict[str, float]] = {}
         realized = 0.0
+        closed_cost_basis = 0.0
         closed_quantity = 0.0
+        closed_returns: list[float] = []
+        closed_profits: list[float] = []
         for row in rows:
             ticker = str(row["ticker"])
             side = str(row["side"])
@@ -843,18 +853,77 @@ class StrategyStateStore:
             elif side == "sell" and qty > 0:
                 sell_qty = min(qty, position["qty"])
                 avg_cost = position["cost"] / position["qty"] if position["qty"] else 0.0
-                realized += sell_qty * (price - avg_cost)
+                profit = sell_qty * (price - avg_cost)
+                realized += profit
+                closed_cost_basis += sell_qty * avg_cost
+                if sell_qty and avg_cost:
+                    closed_returns.append((price / avg_cost - 1) * 100)
+                    closed_profits.append(profit)
                 position["qty"] -= sell_qty
                 position["cost"] = max(0.0, position["cost"] - sell_qty * avg_cost)
                 closed_quantity += sell_qty
 
+        fees = float(activity_fees["fees"] or 0)
+        net_realized = realized - fees
+        first_value = float(first_equity["equity"]) if first_equity else None
+        latest_value = float(latest_equity["equity"]) if latest_equity else None
+        account_return = (
+            (latest_value / first_value - 1) * 100
+            if first_value and latest_value is not None
+            else None
+        )
+        open_cost_basis = sum(item["cost"] for item in inventory.values())
+        winners = [value for value in closed_returns if value > 0]
+        losers = [value for value in closed_returns if value < 0]
+        gross_profit = sum(value for value in closed_profits if value > 0)
+        gross_loss = sum(value for value in closed_profits if value < 0)
+        peak = 0.0
+        max_drawdown = 0.0 if equity_rows else None
+        for row in equity_rows:
+            value = float(row["equity"])
+            peak = max(peak, value)
+            if peak and max_drawdown is not None:
+                max_drawdown = min(max_drawdown, (value / peak - 1) * 100)
+        tracking_days = None
+        if first_equity and latest_equity:
+            try:
+                tracking_days = max(
+                    1,
+                    (
+                        datetime.fromisoformat(str(latest_equity["timestamp"])).date()
+                        - datetime.fromisoformat(str(first_equity["timestamp"])).date()
+                    ).days + 1,
+                )
+            except ValueError:
+                tracking_days = None
+
         return {
-            "realized_pnl": round(realized - float(activity_fees["fees"] or 0), 2),
+            "realized_pnl": round(net_realized, 2),
             "fees": round(float(activity_fees["fees"] or 0), 2),
             "fill_count": len(rows),
             "closed_quantity": closed_quantity,
-            "open_cost_basis": round(sum(item["cost"] for item in inventory.values()), 2),
-            "latest_equity": float(latest_equity["equity"]) if latest_equity else None,
+            "closed_cost_basis": round(closed_cost_basis, 2),
+            "closed_trade_count": len(closed_returns),
+            "win_rate_pct": round(len(winners) / len(closed_returns) * 100, 1)
+            if closed_returns else None,
+            "average_win_pct": round(sum(winners) / len(winners), 2) if winners else None,
+            "average_loss_pct": round(sum(losers) / len(losers), 2) if losers else None,
+            "profit_factor": round(gross_profit / abs(gross_loss), 2)
+            if gross_loss else None,
+            "realized_return_on_capital_pct": round(
+                net_realized / closed_cost_basis * 100, 2
+            ) if closed_cost_basis else None,
+            "open_cost_basis": round(open_cost_basis, 2),
+            "capital_deployed_pct": round(
+                open_cost_basis / latest_value * 100, 2
+            ) if latest_value else None,
+            "first_equity": first_value,
+            "first_equity_at": str(first_equity["timestamp"]) if first_equity else None,
+            "account_return_pct": round(account_return, 2) if account_return is not None else None,
+            "max_account_drawdown_pct": round(max_drawdown, 2)
+            if max_drawdown is not None else None,
+            "tracking_days": tracking_days,
+            "latest_equity": latest_value,
             "latest_equity_at": str(latest_equity["timestamp"]) if latest_equity else None,
         }
 

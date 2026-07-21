@@ -343,6 +343,8 @@ def test_fill_based_performance_does_not_count_duplicate_order_update(tmp_path):
 
     assert summary["fill_count"] == 2
     assert summary["realized_pnl"] == 20
+    assert summary["closed_cost_basis"] == 200
+    assert summary["realized_return_on_capital_pct"] == 10
 
     assert store.reconcile_account_activities(
         [
@@ -360,6 +362,71 @@ def test_fill_based_performance_does_not_count_duplicate_order_update(tmp_path):
     summary = store.performance_summary()
     assert summary["fees"] == 1.25
     assert summary["realized_pnl"] == 18.75
+    assert summary["realized_return_on_capital_pct"] == 9.38
+
+
+def test_performance_summary_normalizes_account_and_deployed_capital(tmp_path):
+    store = StrategyStateStore(tmp_path / "state.db")
+    start = datetime(2026, 1, 5, 15, tzinfo=timezone.utc)
+    store.evaluate_persistent_risk(equity=100_000, mode="paper", now=start)
+    store.record_order_update(
+        {
+            "order_id": "open-buy",
+            "ticker": "MSFT",
+            "side": "buy",
+            "type": "limit",
+            "status": "filled",
+            "qty": 2,
+            "filled_qty": 2,
+            "filled_avg_price": 250,
+        },
+        "paper",
+    )
+    store.evaluate_persistent_risk(
+        equity=101_000, mode="paper", now=start + timedelta(days=1)
+    )
+    store.evaluate_persistent_risk(
+        equity=99_000, mode="paper", now=start + timedelta(days=2)
+    )
+
+    summary = store.performance_summary()
+
+    assert summary["account_return_pct"] == -1
+    assert summary["open_cost_basis"] == 500
+    assert summary["capital_deployed_pct"] == 0.51
+    assert summary["max_account_drawdown_pct"] == -1.98
+    assert summary["tracking_days"] == 3
+
+
+def test_performance_summary_reports_closed_trade_quality(tmp_path):
+    store = StrategyStateStore(tmp_path / "state.db")
+    for order_id, ticker, side, qty, price in (
+        ("aapl-buy", "AAPL", "buy", 2, 100),
+        ("aapl-sell", "AAPL", "sell", 2, 110),
+        ("msft-buy", "MSFT", "buy", 1, 200),
+        ("msft-sell", "MSFT", "sell", 1, 180),
+    ):
+        store.record_order_update(
+            {
+                "order_id": order_id,
+                "ticker": ticker,
+                "side": side,
+                "type": "limit",
+                "status": "filled",
+                "qty": qty,
+                "filled_qty": qty,
+                "filled_avg_price": price,
+            },
+            "paper",
+        )
+
+    summary = store.performance_summary()
+
+    assert summary["closed_trade_count"] == 2
+    assert summary["win_rate_pct"] == 50
+    assert summary["average_win_pct"] == 10
+    assert summary["average_loss_pct"] == -10
+    assert summary["profit_factor"] == 1
 
 
 def test_health_snapshot_reports_unprotected_live_position(tmp_path):
