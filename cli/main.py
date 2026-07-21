@@ -1831,6 +1831,11 @@ def run_cycle_command(
         "--tickers",
         help="Comma-separated ticker list. Manual tickers are allowed by default.",
     ),
+    discover: bool = typer.Option(
+        False,
+        "--discover",
+        help="Keep manual tickers and add automatically screened candidates.",
+    ),
     confirm_real_money: Optional[str] = typer.Option(
         None,
         "--confirm-real-money",
@@ -1843,6 +1848,7 @@ def run_cycle_command(
     try:
         summary = run_cycle(
             tickers=_parse_ticker_csv(tickers),
+            discover=discover,
             mode=mode,
             real_money_confirmation=confirm_real_money,
         )
@@ -1893,6 +1899,11 @@ def run_bot_command(
         "--tickers",
         help="Comma-separated ticker list. Manual tickers are allowed by default.",
     ),
+    discover: bool = typer.Option(
+        False,
+        "--discover",
+        help="Keep manual tickers and add automatically screened candidates.",
+    ),
     run_now: bool = typer.Option(
         True,
         "--run-now/--wait-first",
@@ -1925,6 +1936,7 @@ def run_bot_command(
             interval_minutes=interval,
             mode=mode,
             tickers=_parse_ticker_csv(tickers),
+            discover=discover,
             run_immediately=run_now,
             daily_at=daily_at,
             real_money_confirmation=confirm_real_money,

@@ -2,7 +2,8 @@
 
 Use `uv` plus a user-level `systemd` service. This is lighter than Docker and
 keeps the bot, SQLite state, logs, and backups easy to inspect. The checked-in
-service is intentionally locked to Alpaca **paper mode** and three liquid tickers.
+service is intentionally locked to Alpaca **paper mode**, keeps three liquid anchor
+tickers, and adds candidates through the built-in discovery screen.
 It uses only hardening directives supported by Oracle's unprivileged user systemd;
 the bot still runs as the non-root VM user with `NoNewPrivileges` and `UMask=0077`.
 
@@ -87,7 +88,7 @@ values from `.env` into that diagnostic output.
 ```bash
 cd ~/trader
 uv run tradingagents broker-status
-uv run tradingagents run-cycle --mode dry-run --tickers AAPL,MSFT,NVDA
+uv run tradingagents run-cycle --mode dry-run --tickers AAPL,MSFT,NVDA --discover
 uv run tradingagents health
 ```
 

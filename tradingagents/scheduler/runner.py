@@ -857,6 +857,7 @@ def _scorecard_fields(gate: ScorecardGate) -> dict:
 
 def run_cycle(
     tickers: list[str] | None = None,
+    discover: bool = False,
     dry_run: bool = True,
     mode: str | None = None,
     real_money_confirmation: str | None = None,
@@ -903,10 +904,12 @@ def run_cycle(
                 "clock": clock,
             }
 
-    if tickers:
-        target_tickers = _normalize_tickers(tickers)
-    else:
-        target_tickers = _build_dynamic_universe([])
+    watchlist = _normalize_tickers(tickers or [])
+    target_tickers = (
+        _build_dynamic_universe(watchlist)
+        if discover or not watchlist
+        else watchlist
+    )
 
     cycle_id: int | None = None
     decisions: list[dict] = []
@@ -1514,6 +1517,7 @@ def start_scheduler(
     dry_run: bool = True,
     mode: str | None = None,
     tickers: list[str] | None = None,
+    discover: bool = False,
     run_immediately: bool = True,
     daily_at: str = "08:45",
     timezone_name: str = "America/Chicago",
@@ -1537,6 +1541,7 @@ def start_scheduler(
         try:
             return run_cycle(
                 tickers=tickers,
+                discover=discover,
                 dry_run=(execution_mode == "dry-run"),
                 mode=execution_mode,
                 real_money_confirmation=real_money_confirmation,

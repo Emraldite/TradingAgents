@@ -65,11 +65,25 @@ def test_start_scheduler_runs_once_immediately(monkeypatch):
             interval_minutes=60,
             mode="dry-run",
             tickers=["AAPL"],
+            discover=True,
         )
 
     assert len(cycles) == 1
     assert cycles[0]["tickers"] == ["AAPL"]
+    assert cycles[0]["discover"] is True
     assert _FakeScheduler.instances[0].interval == 60
+
+
+def test_dynamic_universe_keeps_watchlist_and_adds_candidates(monkeypatch):
+    monkeypatch.setattr(runner, "_technical_candidates", lambda: ["NVDA", "AMD"])
+    monkeypatch.setattr(
+        runner, "_sector_expansion_candidates", lambda tickers: ["META"]
+    )
+    monkeypatch.setattr(runner, "_hard_exclusion_reason", lambda ticker: None)
+
+    assert runner._build_dynamic_universe(["AAPL", "MSFT", "NVDA"]) == [
+        "AAPL", "MSFT", "NVDA", "AMD", "META"
+    ]
 
 
 def test_start_scheduler_can_wait_for_first_interval(monkeypatch):
