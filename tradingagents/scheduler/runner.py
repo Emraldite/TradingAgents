@@ -52,9 +52,9 @@ MANIPULATION_SELL_THRESHOLD = float(
 )
 LIMIT_SLIPPAGE_BPS = int(DEFAULT_CONFIG.get("limit_slippage_bps", 20))
 SHADOW_SLIPPAGE_BPS = int(DEFAULT_CONFIG.get("shadow_slippage_bps", 10))
-MAX_UNIVERSE_SIZE = 20
+MAX_UNIVERSE_SIZE = int(DEFAULT_CONFIG.get("discovery_max_candidates", 5))
 GRAPH_ANALYSTS = ["insider", "market", "social", "news", "fundamentals"]
-STRATEGY_IMPLEMENTATION_VERSION = "sec-insider-v2"
+STRATEGY_IMPLEMENTATION_VERSION = "sec-insider-full-discovery-v2"
 GRAPH_BUY_RATINGS = {"Buy", "Overweight"}
 STRATEGY_RULES = strategy_rules_from_config(DEFAULT_CONFIG)
 APPROVED_FREE_GOOGLE_MODELS = frozenset(
@@ -101,13 +101,6 @@ TECHNICAL_SCREEN_TICKERS = [
     "BA",
     "CVX",
 ]
-
-SECTOR_EXPANSION = {
-    "semiconductors": ["NVDA", "AMD", "AVGO", "QCOM", "INTC"],
-    "defense": ["LMT", "RTX", "NOC", "GD", "BA"],
-    "energy": ["XOM", "CVX", "COP", "SLB", "EOG"],
-    "megacap_tech": ["AAPL", "MSFT", "GOOGL", "META", "AMZN"],
-}
 
 LEVERAGED_ETFS = {
     "TQQQ",
@@ -366,8 +359,9 @@ def _latest_close_and_volume(ticker: str, period: str = "5d") -> tuple[float, fl
     return _latest_scalar(data, "Close") or 0.0, _latest_scalar(data, "Volume")
 
 
-def _technical_candidates(max_candidates: int = 8) -> list[str]:
-    candidates: list[str] = []
+def _technical_candidates(max_candidates: int = MAX_UNIVERSE_SIZE) -> list[str]:
+    candidates: list[tuple[float, str]] = []
+    min_volume_ratio = float(DEFAULT_CONFIG.get("discovery_min_volume_ratio", 1.2))
     for ticker in TECHNICAL_SCREEN_TICKERS:
         try:
             data = yf.download(
@@ -382,29 +376,70 @@ def _technical_candidates(max_candidates: int = 8) -> list[str]:
             volume = _latest_scalar(data, "Volume") or 0.0
             avg_volume = _mean_scalar(data["Volume"].tail(30))
             ma20 = _mean_scalar(data["Close"].tail(20))
-            if close > ma20 and avg_volume > 0 and volume / avg_volume >= 2:
-                candidates.append(ticker)
+            volume_ratio = volume / avg_volume if avg_volume > 0 else 0.0
+            if close > ma20 and volume_ratio >= min_volume_ratio:
+                trend = close / ma20 - 1 if ma20 > 0 else 0.0
+                candidates.append((volume_ratio + trend * 10, ticker))
         except Exception as exc:
             logger.debug("Technical screen failed for %s: %s", ticker, exc)
-        if len(candidates) >= max_candidates:
-            break
-    return candidates
+    return [ticker for _, ticker in sorted(candidates, reverse=True)[:max_candidates]]
 
 
-def _sector_expansion_candidates(watchlist_tickers: list[str]) -> list[str]:
-    expanded: list[str] = []
-    watch = set(watchlist_tickers)
-    for tickers in SECTOR_EXPANSION.values():
-        if len(watch.intersection(tickers)) >= 2:
-            for ticker in tickers:
-                if ticker not in watch and ticker not in expanded:
-                    expanded.append(ticker)
-    return expanded
+def _screener_candidates() -> list[str]:
+    payload, error = executor.get_stock_screener_checked(top=20)
+    if error:
+        logger.warning("Alpaca discovery was partially or fully unavailable: %s", error)
+    scores: dict[str, float] = {}
+
+    actives = payload.get("most_actives") or []
+    for rank, item in enumerate(actives):
+        ticker = str(item.get("symbol") or "").strip().upper()
+        if ticker and ticker.replace(".", "").replace("-", "").isalnum():
+            scores[ticker] = scores.get(ticker, 0.0) + 2 * (len(actives) - rank) / max(len(actives), 1)
+
+    for group in ("gainers", "losers"):
+        movers = payload.get(group) or []
+        for rank, item in enumerate(movers):
+            ticker = str(item.get("symbol") or "").strip().upper()
+            if not ticker or not ticker.replace(".", "").replace("-", "").isalnum():
+                continue
+            try:
+                move = abs(float(item.get("percent_change") or 0))
+            except (TypeError, ValueError):
+                move = 0.0
+            mover_score = 1 + min(move / 10, 2) + (len(movers) - rank) / max(len(movers), 1)
+            scores[ticker] = scores.get(ticker, 0.0) + mover_score
+
+    ranked = sorted(scores, key=lambda ticker: (-scores[ticker], ticker))
+    assets, asset_error = executor.get_discovery_assets_checked(ranked)
+    if asset_error:
+        logger.warning("Alpaca discovery metadata was unavailable: %s", asset_error)
+        return []
+
+    excluded_name_terms = (" ETF", " ETN", " FUND", " TRUST")
+    return [
+        ticker
+        for ticker in ranked
+        if (asset := assets.get(ticker))
+        and asset.get("tradable") is True
+        and asset.get("marginable") is True
+        and asset.get("fractionable") is True
+        and "has_options" in (asset.get("attributes") or [])
+        and str(asset.get("exchange") or "").upper() != "OTC"
+        and not any(
+            term in f" {str(asset.get('name') or '').upper()}"
+            for term in excluded_name_terms
+        )
+    ]
 
 
 def _build_dynamic_universe(watchlist_tickers: list[str], max_size: int = MAX_UNIVERSE_SIZE) -> list[str]:
     universe: list[str] = []
-    for ticker in watchlist_tickers + _technical_candidates() + _sector_expansion_candidates(watchlist_tickers):
+    discovered = _screener_candidates()
+    if not discovered:
+        logger.warning("Alpaca discovery returned no candidates; using technical fallback")
+        discovered = _technical_candidates(max_candidates=max_size * 3)
+    for ticker in watchlist_tickers + discovered:
         if _hard_exclusion_reason(ticker):
             continue
         if ticker not in universe:
@@ -798,6 +833,8 @@ def _scorecard_strategy_key() -> str:
     global_news_limit = DEFAULT_CONFIG.get(
         "global_news_article_limit", "default"
     )
+    discovery_max = DEFAULT_CONFIG.get("discovery_max_candidates", "default")
+    discovery_volume = DEFAULT_CONFIG.get("discovery_min_volume_ratio", "default")
     secondary = str(DEFAULT_CONFIG.get("secondary_llm_provider", "none"))
     if secondary.lower() == str(provider).lower():
         secondary = "none"
@@ -817,6 +854,7 @@ def _scorecard_strategy_key() -> str:
         f"full_graph:{STRATEGY_IMPLEMENTATION_VERSION}:{version}:"
         f"primary-{provider}:{quick}:{deep}:max-output-{output_cap}:"
         f"reasoning-{reasoning_effort}:news-{news_limit}:{global_news_limit}:"
+        f"discovery-{discovery_max}:{discovery_volume}:"
         f"secondary-{secondary}:{secondary_quick}:{secondary_deep}:"
         f"max-output-{secondary_cap}"
     )
@@ -910,6 +948,7 @@ def run_cycle(
         if discover or not watchlist
         else watchlist
     )
+    logger.info("Cycle universe: %s", ", ".join(target_tickers) or "none")
 
     cycle_id: int | None = None
     decisions: list[dict] = []
@@ -1485,6 +1524,7 @@ def run_cycle(
         "mode": execution_mode,
         "status": cycle_status,
         "tickers": len(target_tickers),
+        "ticker_symbols": target_tickers,
         "signals": signals_fired,
         "submitted": orders_submitted,
         "executed": confirmed_fills,

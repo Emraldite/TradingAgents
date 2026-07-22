@@ -74,16 +74,63 @@ def test_start_scheduler_runs_once_immediately(monkeypatch):
     assert _FakeScheduler.instances[0].interval == 60
 
 
-def test_dynamic_universe_keeps_watchlist_and_adds_candidates(monkeypatch):
-    monkeypatch.setattr(runner, "_technical_candidates", lambda: ["NVDA", "AMD"])
+def test_screener_ranking_rewards_names_present_in_multiple_lists(monkeypatch):
     monkeypatch.setattr(
-        runner, "_sector_expansion_candidates", lambda tickers: ["META"]
+        runner.executor,
+        "get_stock_screener_checked",
+        lambda top: (
+            {
+                "most_actives": [{"symbol": "AAPL"}, {"symbol": "PLTR"}],
+                "gainers": [{"symbol": "PLTR", "percent_change": 8}],
+                "losers": [
+                    {"symbol": "QQQ", "percent_change": -20},
+                    {"symbol": "XYZ", "percent_change": -12},
+                ],
+            },
+            None,
+        ),
+    )
+    monkeypatch.setattr(
+        runner.executor,
+        "get_discovery_assets_checked",
+        lambda symbols: (
+            {
+                symbol: {
+                    "tradable": True,
+                    "marginable": True,
+                    "fractionable": True,
+                    "attributes": ["has_options"],
+                    "exchange": "NASDAQ",
+                    "name": "Invesco QQQ Trust" if symbol == "QQQ" else f"{symbol} Common Stock",
+                }
+                for symbol in symbols
+            },
+            None,
+        ),
+    )
+
+    candidates = runner._screener_candidates()
+    assert candidates[0] == "PLTR"
+    assert "QQQ" not in candidates
+
+
+def test_dynamic_universe_keeps_watchlist_and_caps_discovery(monkeypatch):
+    monkeypatch.setattr(runner, "_screener_candidates", lambda: ["PLTR", "AMD", "META"])
+    monkeypatch.setattr(runner, "_hard_exclusion_reason", lambda ticker: None)
+
+    assert runner._build_dynamic_universe(["AAPL"], max_size=3) == [
+        "AAPL", "PLTR", "AMD"
+    ]
+
+
+def test_dynamic_universe_falls_back_when_alpaca_has_no_candidates(monkeypatch):
+    monkeypatch.setattr(runner, "_screener_candidates", lambda: [])
+    monkeypatch.setattr(
+        runner, "_technical_candidates", lambda max_candidates: ["PLTR", "AMD"]
     )
     monkeypatch.setattr(runner, "_hard_exclusion_reason", lambda ticker: None)
 
-    assert runner._build_dynamic_universe(["AAPL", "MSFT", "NVDA"]) == [
-        "AAPL", "MSFT", "NVDA", "AMD", "META"
-    ]
+    assert runner._build_dynamic_universe([], max_size=1) == ["PLTR"]
 
 
 def test_start_scheduler_can_wait_for_first_interval(monkeypatch):

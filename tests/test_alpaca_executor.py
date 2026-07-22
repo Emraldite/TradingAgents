@@ -98,6 +98,63 @@ def test_free_iex_snapshot_returns_bid_ask_and_timestamp(monkeypatch):
     assert captured["url"].endswith("/v2/stocks/AAPL/snapshot")
 
 
+def test_stock_screener_combines_most_active_and_movers(monkeypatch):
+    from tradingagents.execution import alpaca_executor
+    calls = []
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    def fake_get(url, **kwargs):
+        calls.append(kwargs.get("params"))
+        if url.endswith("most-actives"):
+            return Response({"most_actives": [{"symbol": "PLTR", "volume": 10}]})
+        return Response(
+            {
+                "gainers": [{"symbol": "AMD", "percent_change": 5}],
+                "losers": [{"symbol": "XYZ", "percent_change": -4}],
+            }
+        )
+
+    monkeypatch.setattr(alpaca_executor.requests, "get", fake_get)
+
+    result, error = alpaca_executor.AlpacaExecutor().get_stock_screener_checked()
+
+    assert error is None
+    assert result["most_actives"][0]["symbol"] == "PLTR"
+    assert result["gainers"][0]["symbol"] == "AMD"
+    assert result["losers"][0]["symbol"] == "XYZ"
+    assert calls[0]["by"] == "trades"
+
+
+def test_discovery_asset_metadata_is_limited_to_requested_symbols(monkeypatch):
+    from tradingagents.execution import alpaca_executor
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [
+                {"symbol": "PLTR", "tradable": True},
+                {"symbol": "AAPL", "tradable": True},
+            ]
+
+    monkeypatch.setattr(alpaca_executor.requests, "get", lambda *args, **kwargs: Response())
+
+    result, error = alpaca_executor.AlpacaExecutor().get_discovery_assets_checked(["pltr"])
+
+    assert error is None
+    assert list(result) == ["PLTR"]
+
+
 def test_limit_buy_uses_quantity_and_limit_price(monkeypatch):
     from tradingagents.execution import alpaca_executor
 

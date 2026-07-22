@@ -180,6 +180,69 @@ class AlpacaExecutor:
             logger.error("Failed to fetch Alpaca IEX snapshot for %s: %s", symbol, exc)
             return None, str(exc)
 
+    def get_stock_screener_checked(
+        self,
+        top: int = 20,
+    ) -> tuple[dict[str, list[dict[str, Any]]], str | None]:
+        """Fetch Alpaca's most-active and mover lists for stock discovery."""
+        limit = max(1, min(top, 50))
+        result: dict[str, list[dict[str, Any]]] = {}
+        errors: list[str] = []
+        requests_to_make = (
+            ("most_actives", "/v1beta1/screener/stocks/most-actives", {"by": "trades", "top": limit}),
+            ("movers", "/v1beta1/screener/stocks/movers", {"top": limit}),
+        )
+        for name, path, params in requests_to_make:
+            try:
+                response = requests.get(
+                    f"{DATA_BASE}{path}",
+                    headers=_headers(),
+                    params=params,
+                    timeout=10,
+                )
+                response.raise_for_status()
+                payload = response.json()
+                if not isinstance(payload, dict):
+                    raise ValueError("response was not an object")
+                if name == "most_actives":
+                    values = payload.get("most_actives") or []
+                    result[name] = [dict(item) for item in values if isinstance(item, dict)]
+                else:
+                    for key in ("gainers", "losers"):
+                        values = payload.get(key) or []
+                        result[key] = [dict(item) for item in values if isinstance(item, dict)]
+            except Exception as exc:
+                errors.append(f"{name}: {exc}")
+                logger.warning("Alpaca stock screener %s failed: %s", name, exc)
+        return result, "; ".join(errors) or None
+
+    def get_discovery_assets_checked(
+        self,
+        symbols: list[str],
+    ) -> tuple[dict[str, dict[str, Any]], str | None]:
+        """Return active Alpaca metadata for only the requested symbols."""
+        requested = {symbol.strip().upper() for symbol in symbols if symbol.strip()}
+        try:
+            response = requests.get(
+                f"{ALPACA_BASE}/v2/assets",
+                headers=_headers(),
+                params={"status": "active", "asset_class": "us_equity"},
+                timeout=20,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, list):
+                raise ValueError("response was not a list")
+            return {
+                str(item.get("symbol") or "").upper(): dict(item)
+                for item in payload
+                if isinstance(item, dict)
+                and str(item.get("symbol") or "").upper() in requested
+            }, None
+        except Exception as exc:
+            logger.warning("Alpaca discovery asset metadata failed: %s", exc)
+            return {}, str(exc)
+
     def get_open_orders(self) -> list[dict[str, Any]]:
         return self.get_recent_orders(limit=100, status="open")
 

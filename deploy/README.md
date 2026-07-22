@@ -2,8 +2,8 @@
 
 Use `uv` plus a user-level `systemd` service. This is lighter than Docker and
 keeps the bot, SQLite state, logs, and backups easy to inspect. The checked-in
-service is intentionally locked to Alpaca **paper mode**, keeps three liquid anchor
-tickers, and adds candidates through the built-in discovery screen.
+service is intentionally locked to Alpaca **paper mode** and uses the built-in
+full-market discovery screen.
 It uses only hardening directives supported by Oracle's unprivileged user systemd;
 the bot still runs as the non-root VM user with `NoNewPrivileges` and `UMask=0077`.
 
@@ -88,7 +88,7 @@ values from `.env` into that diagnostic output.
 ```bash
 cd ~/trader
 uv run tradingagents broker-status
-uv run tradingagents run-cycle --mode dry-run --tickers AAPL,MSFT,NVDA --discover
+uv run tradingagents run-cycle --mode dry-run --discover
 uv run tradingagents health
 ```
 
@@ -111,7 +111,7 @@ Check it without printing `.env`:
 
 ```bash
 systemctl --user status tradingagents
-journalctl --user -u tradingagents --since today
+tail -n 100 ~/trader/logs/trading-bot.log
 cd ~/trader && .venv/bin/tradingagents health
 ```
 
@@ -139,8 +139,11 @@ cd ~/trader
 .venv/bin/tradingagents health
 .venv/bin/tradingagents halt-trading --reason "operator review"
 .venv/bin/tradingagents backup-state --output-dir ~/trader/backups
-journalctl --user -u tradingagents -f
+tail -f ~/trader/logs/trading-bot.log
 ```
+
+Some Oracle images have no user journal files; the rotating bot log above is
+the canonical log source.
 
 Test restoring a backup before relying on it. The SQLite state under
 `~/.tradingagents` and `.env` are VM-local and ignored by Git.

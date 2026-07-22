@@ -38,6 +38,8 @@ RELEASE_CONFIG_KEYS = (
     "scheduler_max_position_pct",
     "scheduler_max_open_positions",
     "scheduler_min_daily_volume",
+    "discovery_max_candidates",
+    "discovery_min_volume_ratio",
     "daily_drawdown_limit",
     "weekly_drawdown_limit",
     "total_drawdown_limit",

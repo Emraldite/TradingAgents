@@ -146,11 +146,14 @@ is accepted only as a safe alias for `paper`; it never means real money.
 ```powershell
 uv run tradingagents run-cycle --mode paper --tickers AAPL
 uv run tradingagents run-bot --mode paper --tickers AAPL,NVDA,MSFT
-uv run tradingagents run-bot --mode paper --tickers AAPL,NVDA,MSFT --discover
+uv run tradingagents run-bot --mode paper --discover
 ```
 
-`--discover` always keeps the manual tickers, then adds screened momentum/volume
-and same-sector candidates up to the universe cap.
+`--discover` ranks Alpaca's live most-active stocks and market movers, then sends
+only the top five through the full graph. Manual `--tickers` remain optional
+anchors. Discovery removes funds and non-tradable/non-marginable/non-fractional
+assets, and requires listed options as a basic quality/liquidity filter. If Alpaca
+screening is unavailable, the bot falls back to its local momentum/volume screen.
 
 The bot runs once immediately and then at 8:45 AM America/Chicago each weekday.
 Keep the terminal open and use `Ctrl+C` for a clean stop. Use `--wait-first`,

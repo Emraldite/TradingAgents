@@ -35,6 +35,8 @@ def test_no_env_uses_built_in_defaults(monkeypatch):
     assert dc.DEFAULT_CONFIG["groq_reasoning_effort"] == "low"
     assert dc.DEFAULT_CONFIG["news_article_limit"] == 8
     assert dc.DEFAULT_CONFIG["global_news_article_limit"] == 5
+    assert dc.DEFAULT_CONFIG["discovery_max_candidates"] == 5
+    assert dc.DEFAULT_CONFIG["discovery_min_volume_ratio"] == 1.2
     assert dc.DEFAULT_CONFIG["backend_url"] is None
     assert dc.DEFAULT_CONFIG["max_debate_rounds"] == 1
     assert dc.DEFAULT_CONFIG["checkpoint_enabled"] is False
@@ -70,6 +72,7 @@ def test_int_coercion(monkeypatch):
         TRADINGAGENTS_CEREBRAS_REQUESTS_PER_MINUTE="4",
         TRADINGAGENTS_CEREBRAS_MAX_OUTPUT_TOKENS="900",
         TRADINGAGENTS_CEREBRAS_MAX_RETRIES="0",
+        TRADINGAGENTS_DISCOVERY_MAX_CANDIDATES="7",
     )
     assert dc.DEFAULT_CONFIG["max_debate_rounds"] == 3
     assert isinstance(dc.DEFAULT_CONFIG["max_debate_rounds"], int)
@@ -82,6 +85,7 @@ def test_int_coercion(monkeypatch):
     assert dc.DEFAULT_CONFIG["cerebras_requests_per_minute"] == 4
     assert dc.DEFAULT_CONFIG["cerebras_max_output_tokens"] == 900
     assert dc.DEFAULT_CONFIG["cerebras_max_retries"] == 0
+    assert dc.DEFAULT_CONFIG["discovery_max_candidates"] == 7
 
 
 def test_scheduler_float_coercion(monkeypatch):
@@ -91,6 +95,7 @@ def test_scheduler_float_coercion(monkeypatch):
         TRADINGAGENTS_SCORECARD_WARMUP_POSITION_PCT="0.004",
         TRADINGAGENTS_STOP_LOSS_PCT="-0.04",
         TRADINGAGENTS_MAX_HOLD_TRADING_DAYS="7",
+        TRADINGAGENTS_DISCOVERY_MIN_VOLUME_RATIO="1.1",
     )
     assert dc.DEFAULT_CONFIG["scheduler_buy_position_pct"] == 0.015
     assert isinstance(dc.DEFAULT_CONFIG["scheduler_buy_position_pct"], float)
@@ -98,6 +103,7 @@ def test_scheduler_float_coercion(monkeypatch):
     assert isinstance(dc.DEFAULT_CONFIG["scorecard_warmup_position_pct"], float)
     assert dc.DEFAULT_CONFIG["stop_loss_pct"] == -0.04
     assert dc.DEFAULT_CONFIG["max_hold_trading_days"] == 7
+    assert dc.DEFAULT_CONFIG["discovery_min_volume_ratio"] == 1.1
 
 
 def test_data_collection_overrides(monkeypatch):

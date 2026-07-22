@@ -1866,6 +1866,7 @@ def run_cycle_command(
     table.add_row("Mode", str(summary.get("mode")))
     table.add_row("Status", str(summary.get("status")))
     table.add_row("Tickers", str(summary.get("tickers", 0)))
+    table.add_row("Symbols", ", ".join(summary.get("ticker_symbols") or []) or "-")
     table.add_row("Signals", str(summary.get("signals", 0)))
     table.add_row("Orders Submitted", str(summary.get("submitted", 0)))
     table.add_row("Confirmed Fill Events", str(summary.get("executed", 0)))
