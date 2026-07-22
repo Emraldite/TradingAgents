@@ -798,6 +798,11 @@ def _run_graph_analysis(
     }
 
 
+def _compact_decision(decision: str, limit: int = 1_200) -> str:
+    text = " ".join(str(decision or "No rationale returned").split())
+    return text if len(text) <= limit else text[: limit - 3] + "..."
+
+
 def _position_pct_for_rating(rating: str) -> float:
     return position_pct_for_rating(rating, STRATEGY_RULES)
 
@@ -1145,7 +1150,13 @@ def run_cycle(
         else len(executor.get_portfolio())
     )
 
-    for ticker in target_tickers:
+    for ticker_number, ticker in enumerate(target_tickers, start=1):
+        logger.info(
+            "Ticker %d/%d %s: evaluating",
+            ticker_number,
+            len(target_tickers),
+            ticker,
+        )
         if ticker in blocked_tickers:
             logger.info("%s skipped: %s", ticker, blocked_tickers[ticker])
             decisions.append(
@@ -1206,6 +1217,7 @@ def run_cycle(
             continue
 
         trade_date = datetime.now().strftime("%Y-%m-%d")
+        logger.info("%s: AI analysis started", ticker)
         try:
             rating, analysis = _run_graph_analysis(graph, ticker, trade_date)
         except Exception as exc:
@@ -1229,6 +1241,12 @@ def run_cycle(
             )
             continue
         graph_successes += 1
+        logger.info(
+            "%s: AI analysis complete | rating=%s | rationale=%s",
+            ticker,
+            rating,
+            _compact_decision(analysis.get("final_trade_decision", "")),
+        )
 
         try:
             scorecard.record_decision(
@@ -1257,6 +1275,7 @@ def run_cycle(
         gate = scorecard.gate_for_strategy(scorecard_strategy_key)
 
         if rating not in GRAPH_BUY_RATINGS:
+            logger.info("%s: no entry | graph rating=%s", ticker, rating)
             decisions.append(
                 {
                     "ticker": ticker,

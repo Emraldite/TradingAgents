@@ -56,6 +56,8 @@ def _configure_bot_logging(log_file: Path) -> Path:
         handlers=[console_handler, file_handler],
         force=True,
     )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     return resolved
 
 

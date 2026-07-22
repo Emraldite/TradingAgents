@@ -73,6 +73,16 @@ def test_run_cycle_skips_when_graph_rating_is_hold(monkeypatch):
     assert summary["decisions"][0]["reason"] == "graph_rating=Hold"
 
 
+def test_compact_decision_is_single_line_and_bounded():
+    decision = "**Rating**: Hold\n\n**Investment Thesis**: " + "x" * 1_300
+
+    compact = runner._compact_decision(decision)
+
+    assert "\n" not in compact
+    assert len(compact) == 1_200
+    assert compact.endswith("...")
+
+
 def test_run_cycle_uses_graph_buy_rating_for_entry(monkeypatch):
     monkeypatch.setattr(runner, "_create_analysis_graph", lambda: object())
     monkeypatch.setattr(runner, "_create_scorecard", lambda: FakeScorecard(allowed_position_pct=0.02))
