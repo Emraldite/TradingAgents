@@ -61,6 +61,17 @@ def _configure_bot_logging(log_file: Path) -> Path:
     return resolved
 
 
+def _download_yfinance_quiet(yf, *args, **kwargs):
+    """Suppress yfinance's duplicate stderr errors; callers report failures once."""
+    yfinance_logger = logging.getLogger("yfinance")
+    previous_level = yfinance_logger.level
+    yfinance_logger.setLevel(logging.CRITICAL)
+    try:
+        return yf.download(*args, **kwargs)
+    finally:
+        yfinance_logger.setLevel(previous_level)
+
+
 # Create a deque to store recent messages with a maximum length
 class MessageBuffer:
     # Fixed teams that always run (not user-selectable)
@@ -2360,13 +2371,20 @@ def ml_build_sp500_command(
 
     download_start = (start_date - datetime.timedelta(days=120)).isoformat()
     try:
-        benchmark = yf.download(
+        benchmark = _download_yfinance_quiet(
+            yf,
             "SPY", start=download_start, end=end, progress=False,
             auto_adjust=True, multi_level_index=False,
         ).reset_index()
     except Exception as exc:
         console.print(f"[red]Could not download SPY: {exc}[/red]")
         raise typer.Exit(1) from exc
+    if benchmark.empty:
+        console.print(
+            "[red]Yahoo returned no SPY history. This is commonly temporary "
+            "throttling; wait and rerun the same idempotent batch.[/red]"
+        )
+        raise typer.Exit(1)
     if not audit_market_data(benchmark)["ok"]:
         console.print("[red]SPY data failed its health audit; nothing was written.[/red]")
         raise typer.Exit(1)
@@ -2374,15 +2392,33 @@ def ml_build_sp500_command(
     ledger = MLShadowLedger(database)
     inserted = 0
     succeeded = 0
-    failures: list[str] = []
+    failures: list[dict[str, str]] = []
     for index, symbol in enumerate(symbols, start=1):
         try:
-            stock = yf.download(
+            stock = _download_yfinance_quiet(
+                yf,
                 yahoo_ticker(symbol), start=download_start, end=end, progress=False,
                 auto_adjust=True, multi_level_index=False,
             ).reset_index()
-            if not audit_market_data(stock)["ok"]:
-                raise ValueError("OHLCV audit failed")
+            if stock.empty:
+                failures.append(
+                    {
+                        "ticker": symbol,
+                        "category": "unavailable_history",
+                        "error": "Yahoo returned no historical prices (often delisted/renamed/acquired)",
+                    }
+                )
+                continue
+            audit = audit_market_data(stock)
+            if not audit["ok"]:
+                failures.append(
+                    {
+                        "ticker": symbol,
+                        "category": "data_audit",
+                        "error": "; ".join(issue["code"] for issue in audit["issues"]),
+                    }
+                )
+                continue
             samples = build_ml_samples(
                 stock, benchmark, ticker=symbol, horizon_days=horizon_days
             )
@@ -2394,7 +2430,13 @@ def ml_build_sp500_command(
             inserted += ledger.record(samples)
             succeeded += 1
         except Exception as exc:
-            failures.append(f"{symbol}: {exc}")
+            failures.append(
+                {
+                    "ticker": symbol,
+                    "category": "download_or_processing_error",
+                    "error": str(exc),
+                }
+            )
         if index % 25 == 0 or index == len(symbols):
             console.print(
                 f"Processed {index}/{len(symbols)} | successful {succeeded} | "
@@ -2424,10 +2466,30 @@ def ml_build_sp500_command(
         f"Build {build_id}: ledger now has {summary['samples']} samples across "
         f"{summary['tickers']} tickers. No LLM quota was used."
     )
-    for failure in failures[:20]:
-        console.print(f"[yellow]{failure}[/yellow]")
-    if len(failures) > 20:
-        console.print(f"[yellow]...and {len(failures) - 20} more failures recorded in SQLite.[/yellow]")
+    if failures:
+        from collections import Counter
+
+        failure_counts = Counter(failure["category"] for failure in failures)
+        console.print(
+            "[yellow]Skipped histories: "
+            + ", ".join(
+                f"{category}={count}" for category, count in sorted(failure_counts.items())
+            )
+            + ". Full details were recorded in SQLite.[/yellow]"
+        )
+        unexpected = [
+            failure
+            for failure in failures
+            if failure["category"] == "download_or_processing_error"
+        ]
+        for failure in unexpected[:10]:
+            console.print(
+                f"[red]{failure['ticker']}: {failure['error']}[/red]"
+            )
+        if len(unexpected) > 10:
+            console.print(
+                f"[red]...and {len(unexpected) - 10} additional unexpected errors.[/red]"
+            )
     console.print("[dim]Shadow-only: neither this dataset nor its model can place orders.[/dim]")
     if succeeded == 0:
         raise typer.Exit(1)
