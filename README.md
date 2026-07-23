@@ -228,6 +228,7 @@ uv run tradingagents data-audit --ticker AAPL --start 2020-01-01
 uv run tradingagents ml-shadow --tickers AAPL,MSFT,NVDA,PLTR --start 2020-01-01
 uv run tradingagents ml-build-sp500 --start 2010-01-01 --horizon-days 10
 uv run tradingagents ml-train --horizon-days 10
+uv run tradingagents ml-train-lightgbm --horizon-days 10 --threads 2
 uv run tradingagents ml-predict --tickers PLTR,AMD,MU,SMCI
 ```
 
@@ -259,6 +260,22 @@ logistic/ridge baseline, reports held-out probability and alpha metrics, and doe
 not modify trading configuration. `ml-predict` downloads recent price history and
 ranks explicitly supplied candidates in advisory shadow mode. No scheduler or
 order-execution module imports the model.
+
+`ml-train-lightgbm` is the nonlinear second-stage experiment. It reads numeric
+features directly from SQLite, adds same-date percentile ranks, gives each market
+date equal training weight, tunes only against validation, and then reports the
+held-out test by per-date quintile, year, daily rank IC, top/bottom spread,
+non-overlapping cohorts, turnover, and explicit round-trip costs. It retrains a
+Ridge baseline on the exact same rows and metrics for a fair comparison. Outputs
+are `data/ml_lightgbm.txt` and `data/ml_lightgbm_report.json`; neither is imported
+by trading execution.
+
+The current `price-volume-v1` label assumes entry at the sample date's opening
+price. The deployed bot starts at 08:45 America/Chicago, after that price was
+available, so all v1 LightGBM results are research-only even when their signal
+gate passes. Promotion requires a rebuilt feature version whose label enters at
+the next tradable open (or a timestamp-valid post-decision price), followed by a
+fresh untouched holdout and live shadow evaluation.
 
 Free Yahoo data will be missing for many delisted historical constituents. That
 failure is reported and retained in the build audit; it is not silently treated

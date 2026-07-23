@@ -2590,6 +2590,213 @@ def ml_train_command(
     console.print("[dim]Shadow-only model; it is not loaded anywhere in trade execution.[/dim]")
 
 
+@app.command("ml-train-lightgbm")
+def ml_train_lightgbm_command(
+    database: Path = typer.Option(
+        Path("data/ml_shadow.db"), "--database", help="ML shadow-ledger SQLite path."
+    ),
+    model_path: Path = typer.Option(
+        Path("data/ml_lightgbm.txt"), "--model", help="LightGBM native model output."
+    ),
+    report_path: Path = typer.Option(
+        Path("data/ml_lightgbm_report.json"),
+        "--report",
+        help="Detailed chronological evaluation report.",
+    ),
+    horizon_days: int = typer.Option(
+        10, "--horizon-days", min=1, max=60, help="Dataset horizon to train."
+    ),
+    validation_start: Optional[str] = typer.Option(
+        None, "--validation-start", help="ISO date; defaults to two calendar years back."
+    ),
+    test_start: Optional[str] = typer.Option(
+        None, "--test-start", help="ISO date; defaults to one calendar year back."
+    ),
+    min_cross_section: int = typer.Option(
+        30,
+        "--min-cross-section",
+        min=10,
+        help="Minimum observed stocks required on a date for percentile ranks.",
+    ),
+    min_samples: int = typer.Option(
+        10_000, "--min-samples", min=1_000, help="Minimum eligible samples."
+    ),
+    round_trip_cost_bps: int = typer.Option(
+        40,
+        "--round-trip-cost-bps",
+        min=0,
+        max=1_000,
+        help="Fees plus slippage subtracted from selected cohorts.",
+    ),
+    rebalance_every: int = typer.Option(
+        10,
+        "--rebalance-every",
+        min=1,
+        max=60,
+        help="Trading-date spacing for non-overlapping cohort diagnostics.",
+    ),
+    threads: int = typer.Option(
+        2, "--threads", min=1, max=32, help="LightGBM worker threads."
+    ),
+):
+    """Train a nonlinear cross-sectional LightGBM model in research-only mode."""
+    from backtests.ml_lightgbm import (
+        add_cross_sectional_features,
+        default_frame_split_dates,
+        load_ml_frame,
+        save_lightgbm_artifacts,
+        train_lightgbm_alpha_model,
+    )
+
+    console.print("Loading numeric features directly from SQLite...")
+    try:
+        frame, raw_features = load_ml_frame(database, horizon_days=horizon_days)
+        frame, model_features, dropped_dates = add_cross_sectional_features(
+            frame,
+            raw_features,
+            min_cross_section=min_cross_section,
+        )
+        default_validation, default_test = default_frame_split_dates(frame)
+        validation_start = validation_start or default_validation.isoformat()
+        test_start = test_start or default_test.isoformat()
+        console.print(
+            f"Training LightGBM on {len(frame):,} samples, "
+            f"{frame['ticker'].nunique():,} tickers, {len(model_features)} features..."
+        )
+        model, report = train_lightgbm_alpha_model(
+            frame,
+            model_features,
+            validation_start=validation_start,
+            test_start=test_start,
+            min_samples=min_samples,
+            round_trip_cost_bps=round_trip_cost_bps,
+            n_jobs=threads,
+            rebalance_every=rebalance_every,
+        )
+        report["dataset"] = {
+            "database": str(database),
+            "raw_samples": int(len(frame) + dropped_dates),
+            "eligible_samples": int(len(frame)),
+            "dropped_for_small_cross_section": dropped_dates,
+            "minimum_cross_section": min_cross_section,
+            "observed_tickers": int(frame["ticker"].nunique()),
+        }
+        model_destination, report_destination = save_lightgbm_artifacts(
+            model,
+            report,
+            model_path=model_path,
+            report_path=report_path,
+        )
+    except ImportError as exc:
+        console.print(
+            "[red]LightGBM is not installed. Deploy the updated lockfile and run "
+            "`uv sync`, then retry.[/red]"
+        )
+        raise typer.Exit(1) from exc
+    except Exception as exc:
+        console.print(f"[red]LightGBM training failed safely: {exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    validation = report["validation_metrics"]
+    test = report["test_metrics"]
+    linear_test = report["fair_linear_baseline"]["test_metrics"]
+    table = Table(title="Cross-Sectional Model Evaluation", box=box.SIMPLE)
+    table.add_column("Metric", style="cyan")
+    table.add_column("LGBM validation", justify="right")
+    table.add_column("LGBM test", justify="right")
+    table.add_column("Fair linear test", justify="right")
+    for key, label in (
+        ("roc_auc", "ROC AUC"),
+        ("alpha_correlation", "Alpha correlation"),
+        ("mean_daily_rank_ic", "Mean daily rank IC"),
+        ("baseline_mean_alpha_pct", "Universe alpha %"),
+        ("top_decile_mean_alpha_pct", "Top decile alpha %"),
+        ("top_decile_cost_adjusted_alpha_pct", "Top decile after cost %"),
+        ("bottom_decile_mean_alpha_pct", "Bottom decile alpha %"),
+        ("top_bottom_spread_pct", "Top-bottom spread %"),
+        (
+            "non_overlapping_top_decile_cost_adjusted_alpha_pct",
+            "Non-overlap top after cost %",
+        ),
+    ):
+        values = (validation.get(key), test.get(key), linear_test.get(key))
+        table.add_row(
+            label,
+            *["n/a" if value is None else f"{value:.4f}" for value in values],
+        )
+    console.print(table)
+
+    quintile_table = Table(title="Held-Out Test Quintiles", box=box.SIMPLE)
+    quintile_table.add_column("Quintile", justify="right")
+    quintile_table.add_column("Samples", justify="right")
+    quintile_table.add_column("Mean alpha", justify="right")
+    quintile_table.add_column("After cost", justify="right")
+    for item in test["quintiles"]:
+        quintile_table.add_row(
+            str(item["quintile"]),
+            f"{item['samples']:,}",
+            f"{item['mean_alpha_pct']:.4f}%",
+            f"{item['cost_adjusted_alpha_pct']:.4f}%",
+        )
+    console.print(quintile_table)
+
+    yearly_table = Table(title="Held-Out Test by Year", box=box.SIMPLE)
+    yearly_table.add_column("Year")
+    yearly_table.add_column("Samples", justify="right")
+    yearly_table.add_column("Names/day", justify="right")
+    yearly_table.add_column("Rank IC", justify="right")
+    yearly_table.add_column("Top alpha", justify="right")
+    yearly_table.add_column("Bottom alpha", justify="right")
+    yearly_table.add_column("Spread", justify="right")
+    for item in test["yearly"]:
+        yearly_table.add_row(
+            str(item["year"]),
+            f"{item['samples']:,}",
+            f"{item['average_names_per_date']:.1f}",
+            "n/a" if item["rank_ic"] is None else f"{item['rank_ic']:.4f}",
+            f"{item['top_decile_alpha_pct']:.4f}%",
+            f"{item['bottom_decile_alpha_pct']:.4f}%",
+            f"{item['top_bottom_spread_pct']:.4f}%",
+        )
+    console.print(yearly_table)
+
+    importance_table = Table(title="Top Feature Importance", box=box.SIMPLE)
+    importance_table.add_column("Feature", style="cyan")
+    importance_table.add_column("Gain", justify="right")
+    importance_table.add_column("Splits", justify="right")
+    for item in report["feature_importance"][:10]:
+        importance_table.add_row(
+            item["feature"], f"{item['gain_pct']:.2f}%", f"{item['splits']:,}"
+        )
+    console.print(importance_table)
+
+    positive_years = sum(
+        item["top_bottom_spread_pct"] > 0 for item in test["yearly"]
+    )
+    research_signal = (
+        test["mean_daily_rank_ic"] is not None
+        and test["mean_daily_rank_ic"] > 0
+        and test["top_bottom_spread_pct"] > 0
+        and test["top_decile_mean_alpha_pct"]
+        > linear_test["top_decile_mean_alpha_pct"]
+        and positive_years >= max(1, len(test["yearly"]) // 2)
+    )
+    console.print(
+        f"Research signal gate: {'PASS' if research_signal else 'FAIL'} | "
+        f"best iteration {report['best_iteration']} | "
+        f"model {model_destination} | report {report_destination}"
+    )
+    console.print(
+        "[bold yellow]Research-only timing limitation:[/bold yellow] "
+        "price-volume-v1 assumes entry at the sample-date open, while the live "
+        "08:45 CT cycle begins after that price. This model cannot be promoted "
+        "until execution-aligned labels are rebuilt."
+    )
+    console.print(
+        "[dim]No scheduler or order-execution module loads this model.[/dim]"
+    )
+
+
 @app.command("ml-predict")
 def ml_predict_command(
     tickers: str = typer.Option(..., "--tickers", help="Comma-separated symbols to rank."),
