@@ -1,40 +1,29 @@
-from types import SimpleNamespace
+from unittest.mock import MagicMock
 
-import pytest
+import pandas as pd
 
-from tradingagents.agents.researchers.bear_researcher import create_bear_researcher
-from tradingagents.agents.researchers.bull_researcher import create_bull_researcher
-
-
-class CapturingLLM:
-    def __init__(self):
-        self.prompt = ""
-
-    def invoke(self, prompt):
-        self.prompt = prompt
-        return SimpleNamespace(content="test argument")
+from tradingagents.agents.analysts import insider_analyst
 
 
-@pytest.mark.parametrize("factory", [create_bull_researcher, create_bear_researcher])
-def test_research_debate_receives_sec_insider_report(factory):
-    llm = CapturingLLM()
-    node = factory(llm)
-    state = {
-        "market_report": "market evidence",
-        "sentiment_report": "sentiment evidence",
-        "news_report": "news evidence",
-        "fundamentals_report": "fundamental evidence",
-        "insider_report": "SEC TEST EVIDENCE",
-        "asset_type": "stock",
-        "investment_debate_state": {
-            "history": "",
-            "bull_history": "",
-            "bear_history": "",
-            "current_response": "",
-            "count": 0,
-        },
-    }
+def test_no_insider_activity_skips_llm(monkeypatch):
+    activity = pd.DataFrame()
+    activity.attrs["data_status"] = "no_activity"
+    activity.attrs["data_reason"] = "No qualifying transactions"
+    monkeypatch.setattr(
+        insider_analyst,
+        "get_sec_insider_activity",
+        lambda *args, **kwargs: activity,
+    )
+    llm = MagicMock()
+    node = insider_analyst.create_insider_analyst(llm)
 
-    node(state)
+    result = node(
+        {
+            "company_of_interest": "NVDA",
+            "trade_date": "2026-07-22",
+            "messages": [],
+        }
+    )
 
-    assert "Official SEC Form 4 insider activity: SEC TEST EVIDENCE" in llm.prompt
+    assert result["insider_report"].startswith("No qualifying")
+    llm.invoke.assert_not_called()

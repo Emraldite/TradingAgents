@@ -160,7 +160,7 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "scheduler_min_daily_volume": 500_000,
     "discovery_max_candidates": 5,
     "discovery_min_volume_ratio": 1.2,
-    "strategy_version": "trader-v3-full-discovery",
+    "strategy_version": "trader-v4-lean-graph",
     "stop_loss_pct": -0.07,
     "take_profit_pct": 0.12,
     "max_hold_trading_days": 10,

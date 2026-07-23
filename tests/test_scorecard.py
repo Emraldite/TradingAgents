@@ -124,3 +124,57 @@ def test_hold_is_excluded_from_directional_gate_sample(tmp_path):
     assert summary["total_decisions"] == 1
     assert summary["resolved_decisions"] == 0
     assert scorecard.gate_for_strategy("test").status == "warming_up"
+
+
+def test_decision_artifact_preserves_evidence_and_config(tmp_path):
+    scorecard = Scorecard(tmp_path / "scorecard.db")
+    decision_id = scorecard.record_decision(
+        strategy_key="test",
+        ticker="AAPL",
+        trade_date="2026-07-22",
+        rating="Buy",
+        model_provider="groq",
+        quick_model="quick",
+        deep_model="deep",
+        mode="paper",
+        entry_price=200,
+        final_trade_decision="Rating: Buy",
+        evidence={"market_report": "Momentum is positive."},
+        config={"rules": {"stop_loss_pct": 0.05}},
+    )
+
+    artifact = scorecard.decision_artifact(decision_id)
+
+    assert artifact is not None
+    assert artifact["evidence"]["market_report"] == "Momentum is positive."
+    assert artifact["config"]["rules"]["stop_loss_pct"] == 0.05
+
+
+def test_experiment_records_and_leaderboard_include_spy_control(tmp_path):
+    scorecard = Scorecard(tmp_path / "scorecard.db", min_resolved_decisions=1)
+    decision_id = _decision(scorecard)
+    scorecard.record_outcome(
+        decision_id,
+        exit_price=103,
+        return_pct=0.03,
+        benchmark_return_pct=0.01,
+        max_drawdown_pct=-0.01,
+        stop_triggered=False,
+    )
+    experiment_id = scorecard.record_experiment(
+        kind="graph-decision-replay",
+        strategy_key="test",
+        config={"initial_cash": 10_000},
+        data={"tickers": ["AAPL"]},
+        metrics={"alpha_pct": 2.0},
+        artifact_path="report.json",
+    )
+
+    experiments = scorecard.experiments()
+    leaderboard = scorecard.leaderboard()
+
+    assert experiments[0]["id"] == experiment_id
+    assert experiments[0]["config"]["initial_cash"] == 10_000
+    assert leaderboard[0]["strategy_key"] == "test"
+    assert leaderboard[0]["role"] == "champion"
+    assert leaderboard[1]["strategy_key"] == "SPY"

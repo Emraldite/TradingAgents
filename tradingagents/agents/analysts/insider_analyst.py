@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from langchain_core.messages import AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.utils.agent_utils import (
@@ -23,6 +24,9 @@ def create_insider_analyst(llm):
             as_of_date=analysis_date,
             lookback_days=int(config.get("insider_lookback_days", 30)),
         )
+        if activity.empty or activity.attrs.get("data_status") == "unavailable":
+            report = _format_activity(activity)
+            return {"messages": [AIMessage(content=report)], "insider_report": report}
         system_message = _build_system_message(
             ticker=ticker,
             analysis_date=analysis_date,

@@ -1,4 +1,4 @@
-"""Portfolio Manager: synthesises the risk-analyst debate into the final decision.
+"""Portfolio Manager: synthesises specialist evidence into the final decision.
 
 Uses LangChain's ``with_structured_output`` so the LLM produces a typed
 ``PortfolioDecision`` directly, in a single call.  The result is rendered
@@ -27,10 +27,17 @@ def create_portfolio_manager(llm):
     def portfolio_manager_node(state) -> dict:
         instrument_context = build_instrument_context(state["company_of_interest"])
 
-        history = state["risk_debate_state"]["history"]
-        risk_debate_state = state["risk_debate_state"]
-        research_plan = state["investment_plan"]
-        trader_plan = state["trader_investment_plan"]
+        reports = {
+            "SEC Form 4 insider activity": state.get("insider_report", ""),
+            "Market and technical evidence": state.get("market_report", ""),
+            "Social sentiment": state.get("sentiment_report", ""),
+            "Company and macro news": state.get("news_report", ""),
+            "Fundamentals": state.get("fundamentals_report", ""),
+        }
+        evidence = "\n\n".join(
+            f"## {name}\n{report or 'Unavailable; treat as neutral.'}"
+            for name, report in reports.items()
+        )
 
         past_context = state.get("past_context", "")
         lessons_line = (
@@ -39,7 +46,7 @@ def create_portfolio_manager(llm):
             else ""
         )
 
-        prompt = f"""As the Portfolio Manager, synthesize the risk analysts' debate and deliver the final trading decision.
+        prompt = f"""As the Portfolio Manager, synthesize the independent analyst reports and deliver the final trading decision.
 
 {instrument_context}
 
@@ -52,12 +59,11 @@ def create_portfolio_manager(llm):
 - **Underweight**: Reduce exposure, take partial profits
 - **Sell**: Exit position or avoid entry
 
-**Context:**
-- Research Manager's investment plan: **{research_plan}**
-- Trader's transaction proposal: **{trader_plan}**
+Compare the strongest bullish evidence with the strongest bearish evidence. Explicitly account for data quality, downside risk, conflicting signals, and missing evidence. Do not average to Hold automatically; use Hold only when the evidence is genuinely balanced. SEC data with no qualifying activity is neutral.
+
 {lessons_line}
-**Risk Analysts Debate History:**
-{history}
+**Current evidence:**
+{evidence}
 
 ---
 
@@ -71,22 +77,6 @@ Be decisive and ground every conclusion in specific evidence from the analysts.{
             "Portfolio Manager",
         )
 
-        new_risk_debate_state = {
-            "judge_decision": final_trade_decision,
-            "history": risk_debate_state["history"],
-            "aggressive_history": risk_debate_state["aggressive_history"],
-            "conservative_history": risk_debate_state["conservative_history"],
-            "neutral_history": risk_debate_state["neutral_history"],
-            "latest_speaker": "Judge",
-            "current_aggressive_response": risk_debate_state["current_aggressive_response"],
-            "current_conservative_response": risk_debate_state["current_conservative_response"],
-            "current_neutral_response": risk_debate_state["current_neutral_response"],
-            "count": risk_debate_state["count"],
-        }
-
-        return {
-            "risk_debate_state": new_risk_debate_state,
-            "final_trade_decision": final_trade_decision,
-        }
+        return {"final_trade_decision": final_trade_decision}
 
     return portfolio_manager_node

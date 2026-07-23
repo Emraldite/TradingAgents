@@ -1,8 +1,8 @@
 # TradingAgents Extended
 
 An AI-assisted swing-trading research and execution system. It collects market,
-news, social, fundamental, and official SEC Form 4 insider signals; asks a multi-agent
-analysis graph for a rating; applies deterministic risk rules; and can submit
+news, social, fundamental, and official SEC Form 4 insider signals; asks five
+specialist analysts and one Portfolio Manager for a rating; applies deterministic risk rules; and can submit
 Alpaca orders.
 
 This is an educational project, not financial advice or a proven profitable
@@ -32,9 +32,9 @@ credentials through chat or commit them. Local `.agents/` notes, runtime SQLite
 databases, logs, and backups are intentionally not portable through Git; copy
 them separately only if needed, and keep a backup before replacing local state.
 
-### Current verified state (2026-07-20)
+### Current verified state (2026-07-22)
 
-- Last recorded full verification: 367 tests passed and 1 optional live-API test
+- Last recorded full verification: 382 tests passed and 1 optional live-API test
   was skipped. Run the suite again after cloning because this is a recorded
   checkpoint, not a guarantee about a new environment.
 - Groq GPT-OSS 20B/120B is the free hosted provider. Live calls require your
@@ -64,7 +64,8 @@ can still create costs.
 
 1. Select a small ticker universe from explicit tickers or the technical screen.
 2. Reject missing/stale prices and unavailable manipulation data in broker modes.
-3. Run the analyst graph and store its versioned Buy, Overweight, Hold,
+3. Run five evidence analysts, then have one Portfolio Manager compare the
+   bullish and bearish evidence and store a versioned Buy, Overweight, Hold,
    Underweight, or Sell rating.
 4. Apply non-AI rules for position count, volume, exposure, scorecard confidence,
    and persistent daily/weekly/total loss limits.
@@ -102,12 +103,12 @@ budget more reliably. Provider failures fail the ticker and produce zero orders;
 there is no automatic paid or trial-provider fallback. NVIDIA NIM remains a manual
 prototype option because its hosted endpoint is governed as a trial service, not a
 dependable production endpoint. Gemini and Ollama remain manual alternatives.
-GPT-OSS manager decisions use JSON Schema mode so Groq does not interpret their
+The Portfolio Manager decision uses JSON Schema mode so Groq does not interpret its
 structured responses as callable tools.
 The insider analyst reads official SEC Form 4 XML, keeps only open-market purchase
 and sale codes, discounts planned sales, excludes amendments, awards/options/gifts/tax events,
-and treats missing SEC data as neutral. Its report is supporting evidence in the
-bull/bear debate; deterministic risk code remains in control.
+and treats missing SEC data as neutral. Its report goes directly to the Portfolio
+Manager; deterministic risk code remains in control.
 Free Alpaca market
 data is [real-time IEX-only](https://docs.alpaca.markets/docs/about-market-data-api),
 so the bot rejects stale or unusually wide IEX quotes;
@@ -166,6 +167,8 @@ buy-and-hold, and run the release audit:
 
 ```powershell
 uv run tradingagents scorecard --resolve
+uv run tradingagents decision-replay --ticker AAPL
+uv run tradingagents experiments
 uv run tradingagents replay-backtest --tickers AAPL,MSFT,NVDA,AMZN,GOOGL
 uv run tradingagents release-audit
 ```
@@ -213,11 +216,54 @@ SQLite's backup API and pass an integrity check before success is reported.
 is the relevant validation command because it executes stored graph decisions on
 the next bar using the same strategy exits and configured sizing rules as the bot.
 One ticker is useful for inspection, but release validation requires at least five.
+Each replay is recorded with its configuration, data range, metrics, and report path.
+`decision-replay` shows the evidence behind a stored rating, while `scorecard` ranks
+eligible strategy versions against SPY; SPY remains champion until a strategy reaches
+the configured minimum resolved-decision sample and produces higher average alpha.
 
 ```powershell
 uv run tradingagents walk-forward --ticker AAPL --start 2020-01-01 --end 2025-01-01
 uv run tradingagents replay-backtest --ticker AAPL
+uv run tradingagents data-audit --ticker AAPL --start 2020-01-01
+uv run tradingagents ml-shadow --tickers AAPL,MSFT,NVDA,PLTR --start 2020-01-01
+uv run tradingagents ml-build-sp500 --start 2010-01-01 --horizon-days 10
+uv run tradingagents ml-train --horizon-days 10
+uv run tradingagents ml-predict --tickers PLTR,AMD,MU,SMCI
 ```
+
+`data-audit` checks OHLCV validity and recomputes features on truncated histories;
+it fails if an earlier feature changes when future rows are removed. `ml-shadow`
+saves prior-day price/volume features and next-open forward-return labels versus
+SPY in `data/ml_shadow.db`. The scheduler and order router never read that file,
+so building the dataset cannot change paper trades.
+
+`ml-build-sp500` is the broad, automatic version. It downloads dated constituent
+snapshots, includes a stock only while it was actually in the index, records a
+SHA-256/source/build audit in SQLite, and continues when Yahoo has no history for
+an old or delisted ticker. It does not call an LLM. The free point-in-time source
+starts in 1996, but the default build starts in 2010 because older free price data
+is substantially less complete. Source coverage is printed, and dates beyond it
+are excluded instead of guessed.
+
+The complete universe can take hours and may encounter Yahoo throttling. Builds
+are idempotent and can be divided into resumable alphabetic batches:
+
+```powershell
+uv run tradingagents ml-build-sp500 --start 2010-01-01 --offset 0 --max-tickers 100
+uv run tradingagents ml-build-sp500 --start 2010-01-01 --offset 100 --max-tickers 100
+```
+
+`ml-train` uses global chronological train/validation/test windows. Samples whose
+future label crosses a window boundary are purged. It writes a transparent JSON
+logistic/ridge baseline, reports held-out probability and alpha metrics, and does
+not modify trading configuration. `ml-predict` downloads recent price history and
+ranks explicitly supplied candidates in advisory shadow mode. No scheduler or
+order-execution module imports the model.
+
+Free Yahoo data will be missing for many delisted historical constituents. That
+failure is reported and retained in the build audit; it is not silently treated
+as a valid no-return sample. A commercial point-in-time price source is required
+before claiming a fully survivorship-free production backtest.
 
 Neither result guarantees future returns. Avoid selecting only the best ticker or
 date range after seeing results; that is overfitting.

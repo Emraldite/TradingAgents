@@ -1592,6 +1592,7 @@ def scorecard_command(
 
     from tradingagents.default_config import DEFAULT_CONFIG
     from tradingagents.risk.scorecard import Scorecard
+    from tradingagents.scheduler.runner import _scorecard_strategy_key
 
     scorecard = Scorecard(
         Path(DEFAULT_CONFIG.get("data_cache_dir", "data")) / "scorecard.db",
@@ -1608,12 +1609,7 @@ def scorecard_command(
         resolved = scorecard.resolve_due_outcomes()
         console.print(f"[green]Resolved {resolved} due scorecard outcome(s).[/green]")
 
-    strategy_key = (
-        f"full_graph:{DEFAULT_CONFIG.get('strategy_version', 'unknown')}:"
-        f"{DEFAULT_CONFIG.get('llm_provider', 'unknown')}:"
-        f"{DEFAULT_CONFIG.get('quick_think_llm', 'unknown')}:"
-        f"{DEFAULT_CONFIG.get('deep_think_llm', 'unknown')}"
-    )
+    strategy_key = _scorecard_strategy_key()
     rows = scorecard.summaries()
     if not rows:
         rows = [scorecard.strategy_summary(strategy_key)]
@@ -1640,6 +1636,106 @@ def scorecard_command(
             gate.status,
         )
     console.print(table)
+
+    leaderboard = Table(title="Champion / Challenger", box=box.SIMPLE)
+    leaderboard.add_column("Rank", justify="right")
+    leaderboard.add_column("Role")
+    leaderboard.add_column("Strategy", style="cyan")
+    leaderboard.add_column("Resolved", justify="right")
+    leaderboard.add_column("Avg Alpha", justify="right")
+    for row in scorecard.leaderboard():
+        leaderboard.add_row(
+            str(row["rank"]),
+            str(row["role"]),
+            str(row["strategy_key"]),
+            str(row["resolved_decisions"]),
+            f"{float(row['avg_alpha_pct']):+.2f}%",
+        )
+    console.print(leaderboard)
+
+
+@app.command("experiments")
+def experiments_command(
+    limit: int = typer.Option(10, "--limit", min=1, max=100),
+):
+    """Show reproducible validation runs stored in the scorecard database."""
+    from tradingagents.risk.scorecard import Scorecard
+
+    scorecard = Scorecard(
+        Path(DEFAULT_CONFIG.get("data_cache_dir", "data")) / "scorecard.db"
+    )
+    table = Table(title="Validation Experiments", box=box.SIMPLE)
+    table.add_column("ID", justify="right")
+    table.add_column("Kind")
+    table.add_column("Strategy", style="cyan")
+    table.add_column("Alpha", justify="right")
+    table.add_column("Created")
+    table.add_column("Artifact")
+    experiments = scorecard.experiments(limit)
+    for experiment in experiments:
+        metrics = experiment["metrics"]
+        table.add_row(
+            str(experiment["id"]),
+            str(experiment["kind"]),
+            str(experiment["strategy_key"]),
+            f"{float(metrics.get('alpha_pct', 0)):+.2f}%",
+            str(experiment["created_at"]),
+            str(experiment.get("artifact_path") or "-"),
+        )
+    if not experiments:
+        table.add_row("-", "-", "-", "-", "-", "-")
+    console.print(table)
+
+
+@app.command("decision-replay")
+def decision_replay_command(
+    decision_id: Optional[int] = typer.Option(None, "--decision-id", min=1),
+    ticker: Optional[str] = typer.Option(
+        None, "--ticker", help="Inspect this ticker's latest decision."
+    ),
+):
+    """Inspect one stored AI decision and its evidence without live API calls."""
+    from tradingagents.risk.scorecard import Scorecard
+
+    scorecard = Scorecard(
+        Path(DEFAULT_CONFIG.get("data_cache_dir", "data")) / "scorecard.db"
+    )
+    if (decision_id is None) == (ticker is None):
+        console.print("[red]Provide exactly one of --decision-id or --ticker.[/red]")
+        raise typer.Exit(2)
+    if ticker is not None:
+        decisions = scorecard.decisions_for_ticker(ticker)
+        if not decisions:
+            console.print(f"[red]No stored decisions were found for {ticker.upper()}.[/red]")
+            raise typer.Exit(1)
+        decision_id = int(decisions[-1]["id"])
+    assert decision_id is not None
+    decision = scorecard.decision_artifact(decision_id)
+    if decision is None:
+        console.print(f"[red]Decision {decision_id} was not found.[/red]")
+        raise typer.Exit(1)
+
+    summary = Table(title=f"Decision {decision_id}", box=box.SIMPLE)
+    summary.add_column("Field", style="cyan")
+    summary.add_column("Value")
+    for field in (
+        "strategy_key",
+        "ticker",
+        "trade_date",
+        "rating",
+        "mode",
+        "model_provider",
+        "quick_model",
+        "deep_model",
+        "entry_price",
+        "resolved_at",
+        "directional_alpha_pct",
+    ):
+        summary.add_row(field.replace("_", " "), str(decision.get(field) or "-"))
+    console.print(summary)
+    console.print(Panel(str(decision.get("final_trade_decision") or "-"), title="Final Decision"))
+    for name, report in decision["evidence"].items():
+        console.print(Panel(str(report or "-"), title=name.replace("_", " ").title()))
 
 
 @app.command("health")
@@ -1769,14 +1865,10 @@ def release_audit_command():
     """Generate the machine-checked report required before real mode can unlock."""
     from tradingagents.risk.release_gate import build_release_report, release_strategy_config
     from tradingagents.risk.scorecard import Scorecard
+    from tradingagents.scheduler.runner import _scorecard_strategy_key
     from tradingagents.state_store import StrategyStateStore
 
-    strategy_key = (
-        f"full_graph:{DEFAULT_CONFIG.get('strategy_version', 'unknown')}:"
-        f"{DEFAULT_CONFIG.get('llm_provider', 'unknown')}:"
-        f"{DEFAULT_CONFIG.get('quick_think_llm', 'unknown')}:"
-        f"{DEFAULT_CONFIG.get('deep_think_llm', 'unknown')}"
-    )
+    strategy_key = _scorecard_strategy_key()
     store = StrategyStateStore(DEFAULT_CONFIG.get("data_cache_dir", "data") + "/strategy_state.db")
     scorecard = Scorecard(
         Path(DEFAULT_CONFIG.get("data_cache_dir", "data")) / "scorecard.db"
@@ -2037,6 +2129,452 @@ def walk_forward_command(
     console.print(table)
 
 
+@app.command("data-audit")
+def data_audit_command(
+    ticker: str = typer.Option(
+        ..., "--ticker", help="Ticker whose OHLCV history should be checked."
+    ),
+    start: str = typer.Option(
+        "2020-01-01", "--start", help="Start date in YYYY-MM-DD format."
+    ),
+    end: str = typer.Option(
+        datetime.date.today().isoformat(), "--end", help="End date in YYYY-MM-DD format."
+    ),
+):
+    """Check market data health and prove feature calculations do not use future rows."""
+    import yfinance as yf
+
+    from backtests.data_audit import audit_feature_lookahead, audit_market_data
+    from backtests.walk_forward import build_walk_forward_features
+
+    try:
+        data = yf.download(
+            ticker,
+            start=start,
+            end=end,
+            progress=False,
+            auto_adjust=False,
+            multi_level_index=False,
+        ).reset_index()
+    except Exception as exc:
+        console.print(f"[red]Could not download {ticker.upper()}: {exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    health = audit_market_data(data)
+    lookahead = audit_feature_lookahead(data, build_walk_forward_features)
+    table = Table(title=f"Data Audit: {ticker.upper()}", box=box.SIMPLE)
+    table.add_column("Check", style="cyan")
+    table.add_column("Result", justify="right")
+    table.add_row("Rows", str(health["rows"]))
+    table.add_row("Range", f"{health['start'] or '-'} to {health['end'] or '-'}")
+    table.add_row("OHLCV health", "PASS" if health["ok"] else "FAIL")
+    table.add_row("Prefix lookahead test", "PASS" if lookahead["ok"] else "FAIL")
+    table.add_row("Feature comparisons", str(lookahead["checks"]))
+    console.print(table)
+    for issue in [*health["issues"], *lookahead["issues"]]:
+        color = "red" if issue["severity"] == "error" else "yellow"
+        console.print(
+            f"[{color}]{issue['severity'].upper()} {issue['code']}: "
+            f"{issue['message']}[/{color}]"
+        )
+    if not health["ok"] or not lookahead["ok"]:
+        raise typer.Exit(1)
+
+
+@app.command("ml-shadow")
+def ml_shadow_command(
+    tickers: str = typer.Option(
+        ..., "--tickers", help="Comma-separated stock tickers."
+    ),
+    start: str = typer.Option(
+        "2020-01-01", "--start", help="Start date in YYYY-MM-DD format."
+    ),
+    end: str = typer.Option(
+        datetime.date.today().isoformat(), "--end", help="End date in YYYY-MM-DD format."
+    ),
+    horizon_days: int = typer.Option(
+        10, "--horizon-days", min=1, max=60, help="Trading bars between entry and label."
+    ),
+    database: Path = typer.Option(
+        Path("data/ml_shadow.db"), "--database", help="Local shadow-ledger SQLite path."
+    ),
+):
+    """Build leakage-safe ML examples without changing trading decisions."""
+    import yfinance as yf
+
+    from backtests.data_audit import audit_market_data
+    from backtests.ml_shadow import MLShadowLedger, build_ml_samples
+
+    symbols = _parse_ticker_csv(tickers)
+    if not symbols:
+        console.print("[red]Provide at least one ticker.[/red]")
+        raise typer.Exit(2)
+
+    try:
+        benchmark = yf.download(
+            "SPY",
+            start=start,
+            end=end,
+            progress=False,
+            auto_adjust=True,
+            multi_level_index=False,
+        ).reset_index()
+    except Exception as exc:
+        console.print(f"[red]Could not download SPY: {exc}[/red]")
+        raise typer.Exit(1) from exc
+    if not audit_market_data(benchmark)["ok"]:
+        console.print("[red]SPY data failed the health audit; no samples were written.[/red]")
+        raise typer.Exit(1)
+
+    ledger = MLShadowLedger(database)
+    table = Table(title="ML Shadow Dataset", box=box.SIMPLE)
+    table.add_column("Ticker", style="cyan")
+    table.add_column("Built", justify="right")
+    table.add_column("New", justify="right")
+    failures = 0
+    for symbol in symbols:
+        try:
+            stock = yf.download(
+                symbol,
+                start=start,
+                end=end,
+                progress=False,
+                auto_adjust=True,
+                multi_level_index=False,
+            ).reset_index()
+            audit = audit_market_data(stock)
+            if not audit["ok"]:
+                failures += 1
+                table.add_row(symbol, "FAILED AUDIT", "0")
+                continue
+            samples = build_ml_samples(
+                stock, benchmark, ticker=symbol, horizon_days=horizon_days
+            )
+            inserted = ledger.record(samples)
+            table.add_row(symbol, str(len(samples)), str(inserted))
+        except Exception as exc:
+            failures += 1
+            table.add_row(symbol, f"FAILED: {exc}", "0")
+    console.print(table)
+    summary = ledger.summary()
+    console.print(
+        f"Ledger: {summary['samples']} samples across {summary['tickers']} tickers | "
+        f"{summary['start_date'] or '-'} to {summary['end_date'] or '-'} | "
+        f"outperformed SPY {summary['outperform_rate_pct']:.1f}%"
+    )
+    console.print(
+        "[dim]Shadow-only: this database is not read by the scheduler or order router.[/dim]"
+    )
+    if failures == len(symbols):
+        raise typer.Exit(1)
+
+
+@app.command("ml-build-sp500")
+def ml_build_sp500_command(
+    start: str = typer.Option(
+        "2010-01-01", "--start", help="First point-in-time membership date to include."
+    ),
+    end: str = typer.Option(
+        datetime.date.today().isoformat(), "--end", help="Last sample date to include."
+    ),
+    horizon_days: int = typer.Option(
+        10, "--horizon-days", min=1, max=60, help="Trading bars between entry and label."
+    ),
+    database: Path = typer.Option(
+        Path("data/ml_shadow.db"), "--database", help="Local shadow-ledger SQLite path."
+    ),
+    membership_cache: Path = typer.Option(
+        Path("data/sp500_history.csv"),
+        "--membership-cache",
+        help="Cached point-in-time constituent snapshots.",
+    ),
+    source_url: str = typer.Option(
+        "https://raw.githubusercontent.com/fja05680/sp500/master/"
+        "S%26P%20500%20Historical%20Components%20%26%20Changes%20%28Updated%29.csv",
+        "--source-url",
+        help="Public date,tickers snapshot CSV; ignored when a cache already exists.",
+    ),
+    refresh_membership: bool = typer.Option(
+        False, "--refresh-membership", help="Refresh the cached membership source."
+    ),
+    offset: int = typer.Option(
+        0, "--offset", min=0, help="Skip this many alphabetized tickers for resumable batches."
+    ),
+    max_tickers: Optional[int] = typer.Option(
+        None, "--max-tickers", min=1, help="Optional batch size; reruns are idempotent."
+    ),
+):
+    """Build a point-in-time historical S&P 500 ML dataset without LLM calls."""
+    import yfinance as yf
+
+    from backtests.data_audit import audit_market_data
+    from backtests.ml_shadow import MLShadowLedger, build_ml_samples
+    from backtests.sp500_history import (
+        content_sha256,
+        fetch_membership_history,
+        filter_samples_for_membership,
+        intervals_by_ticker,
+        parse_membership_history,
+        tickers_overlapping,
+        yahoo_ticker,
+    )
+
+    try:
+        start_date = datetime.date.fromisoformat(start)
+        end_date = datetime.date.fromisoformat(end)
+    except ValueError as exc:
+        console.print(f"[red]Invalid ISO date: {exc}[/red]")
+        raise typer.Exit(2) from exc
+    if start_date >= end_date:
+        console.print("[red]--start must be before --end.[/red]")
+        raise typer.Exit(2)
+
+    try:
+        content, source = fetch_membership_history(
+            source_url=source_url,
+            cache_path=membership_cache,
+            refresh=refresh_membership,
+        )
+        grouped = intervals_by_ticker(parse_membership_history(content))
+    except Exception as exc:
+        console.print(f"[red]Could not load point-in-time membership history: {exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    all_symbols = tickers_overlapping(grouped, start_date, end_date)
+    symbols = all_symbols[offset : offset + max_tickers if max_tickers else None]
+    if not symbols:
+        console.print("[red]No historical constituents matched this batch.[/red]")
+        raise typer.Exit(2)
+    coverage_start = min(item.start_date for values in grouped.values() for item in values)
+    coverage_end = max(item.end_date for values in grouped.values() for item in values)
+    console.print(
+        f"Point-in-time source: {len(all_symbols)} eligible symbols | "
+        f"coverage {coverage_start} to {coverage_end} | batch {offset + 1}-"
+        f"{offset + len(symbols)}"
+    )
+    if end_date > coverage_end:
+        console.print(
+            f"[yellow]Membership source ends {coverage_end}; samples after that date "
+            "will not be guessed or mislabeled.[/yellow]"
+        )
+
+    download_start = (start_date - datetime.timedelta(days=120)).isoformat()
+    try:
+        benchmark = yf.download(
+            "SPY", start=download_start, end=end, progress=False,
+            auto_adjust=True, multi_level_index=False,
+        ).reset_index()
+    except Exception as exc:
+        console.print(f"[red]Could not download SPY: {exc}[/red]")
+        raise typer.Exit(1) from exc
+    if not audit_market_data(benchmark)["ok"]:
+        console.print("[red]SPY data failed its health audit; nothing was written.[/red]")
+        raise typer.Exit(1)
+
+    ledger = MLShadowLedger(database)
+    inserted = 0
+    succeeded = 0
+    failures: list[str] = []
+    for index, symbol in enumerate(symbols, start=1):
+        try:
+            stock = yf.download(
+                yahoo_ticker(symbol), start=download_start, end=end, progress=False,
+                auto_adjust=True, multi_level_index=False,
+            ).reset_index()
+            if not audit_market_data(stock)["ok"]:
+                raise ValueError("OHLCV audit failed")
+            samples = build_ml_samples(
+                stock, benchmark, ticker=symbol, horizon_days=horizon_days
+            )
+            samples = [
+                sample for sample in samples
+                if start_date <= datetime.date.fromisoformat(sample["sample_date"]) <= end_date
+            ]
+            samples = filter_samples_for_membership(samples, grouped[symbol])
+            inserted += ledger.record(samples)
+            succeeded += 1
+        except Exception as exc:
+            failures.append(f"{symbol}: {exc}")
+        if index % 25 == 0 or index == len(symbols):
+            console.print(
+                f"Processed {index}/{len(symbols)} | successful {succeeded} | "
+                f"failed {len(failures)} | new samples {inserted}"
+            )
+
+    build_id = ledger.record_build(
+        {
+            "universe": "sp500-point-in-time",
+            "source": source,
+            "source_sha256": content_sha256(content),
+            "start_date": start,
+            "end_date": end,
+            "horizon_days": horizon_days,
+            "attempted": len(symbols),
+            "succeeded": succeeded,
+            "failed": len(failures),
+            "inserted": inserted,
+            "offset": offset,
+            "membership_coverage_start": coverage_start.isoformat(),
+            "membership_coverage_end": coverage_end.isoformat(),
+            "failure_details": failures,
+        }
+    )
+    summary = ledger.summary()
+    console.print(
+        f"Build {build_id}: ledger now has {summary['samples']} samples across "
+        f"{summary['tickers']} tickers. No LLM quota was used."
+    )
+    for failure in failures[:20]:
+        console.print(f"[yellow]{failure}[/yellow]")
+    if len(failures) > 20:
+        console.print(f"[yellow]...and {len(failures) - 20} more failures recorded in SQLite.[/yellow]")
+    console.print("[dim]Shadow-only: neither this dataset nor its model can place orders.[/dim]")
+    if succeeded == 0:
+        raise typer.Exit(1)
+
+
+@app.command("ml-train")
+def ml_train_command(
+    database: Path = typer.Option(
+        Path("data/ml_shadow.db"), "--database", help="ML shadow-ledger SQLite path."
+    ),
+    model_path: Path = typer.Option(
+        Path("data/ml_model.json"), "--model", help="Transparent JSON model output."
+    ),
+    horizon_days: int = typer.Option(
+        10, "--horizon-days", min=1, max=60, help="Dataset horizon to train."
+    ),
+    validation_start: Optional[str] = typer.Option(
+        None, "--validation-start", help="ISO date; defaults to two calendar years back."
+    ),
+    test_start: Optional[str] = typer.Option(
+        None, "--test-start", help="ISO date; defaults to one calendar year back."
+    ),
+    min_samples: int = typer.Option(
+        1_000, "--min-samples", min=100, help="Guard against meaningless tiny training sets."
+    ),
+):
+    """Train and evaluate a chronological shadow-only alpha model."""
+    from backtests.ml_model import default_split_dates, save_model, train_linear_alpha_model
+    from backtests.ml_shadow import FEATURE_VERSION, MLShadowLedger
+
+    ledger = MLShadowLedger(database)
+    samples = ledger.load_samples(
+        horizon_days=horizon_days, feature_version=FEATURE_VERSION
+    )
+    if not samples:
+        console.print("[red]No matching samples. Run ml-build-sp500 first.[/red]")
+        raise typer.Exit(1)
+    default_validation, default_test = default_split_dates(samples)
+    validation_start = validation_start or default_validation.isoformat()
+    test_start = test_start or default_test.isoformat()
+    try:
+        model = train_linear_alpha_model(
+            samples,
+            validation_start=validation_start,
+            test_start=test_start,
+            min_samples=min_samples,
+        )
+        destination = save_model(model, model_path)
+    except Exception as exc:
+        console.print(f"[red]Training failed safely: {exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    table = Table(title="ML Chronological Evaluation", box=box.SIMPLE)
+    table.add_column("Metric", style="cyan")
+    table.add_column("Validation", justify="right")
+    table.add_column("Held-out test", justify="right")
+    for key, label in (
+        ("roc_auc", "ROC AUC"),
+        ("brier_score", "Brier score"),
+        ("alpha_correlation", "Alpha correlation"),
+        ("baseline_mean_alpha_pct", "Baseline alpha %"),
+        ("top_decile_mean_alpha_pct", "Top-decile alpha %"),
+    ):
+        validation_value = model["validation_metrics"][key]
+        test_value = model["test_metrics"][key]
+        table.add_row(
+            label,
+            "n/a" if validation_value is None else f"{validation_value:.4f}",
+            "n/a" if test_value is None else f"{test_value:.4f}",
+        )
+    console.print(table)
+    counts = model["sample_counts"]
+    console.print(
+        f"Samples: train {counts['train']}, validation {counts['validation']}, "
+        f"test {counts['test']}, boundary-purged {counts['purged']} | "
+        f"model: {destination}"
+    )
+    console.print("[dim]Shadow-only model; it is not loaded anywhere in trade execution.[/dim]")
+
+
+@app.command("ml-predict")
+def ml_predict_command(
+    tickers: str = typer.Option(..., "--tickers", help="Comma-separated symbols to rank."),
+    model_path: Path = typer.Option(
+        Path("data/ml_model.json"), "--model", help="JSON model produced by ml-train."
+    ),
+):
+    """Rank current candidates with the ML model without placing orders or using an LLM."""
+    import yfinance as yf
+
+    from backtests.ml_model import load_model, predict_feature_rows
+    from backtests.ml_shadow import build_ml_feature_rows
+
+    symbols = _parse_ticker_csv(tickers)
+    if not symbols:
+        console.print("[red]Provide at least one ticker.[/red]")
+        raise typer.Exit(2)
+    try:
+        model = load_model(model_path)
+        start = (datetime.date.today() - datetime.timedelta(days=500)).isoformat()
+        end = (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
+        benchmark = yf.download(
+            "SPY", start=start, end=end, progress=False,
+            auto_adjust=True, multi_level_index=False,
+        ).reset_index()
+        rows = []
+        failures = []
+        for symbol in symbols:
+            try:
+                stock = yf.download(
+                    symbol, start=start, end=end, progress=False,
+                    auto_adjust=True, multi_level_index=False,
+                ).reset_index()
+                feature_rows = build_ml_feature_rows(stock, benchmark, ticker=symbol)
+                if not feature_rows:
+                    raise ValueError("not enough aligned price history")
+                rows.append(feature_rows[-1])
+            except Exception as exc:
+                failures.append(f"{symbol}: {exc}")
+        predictions = sorted(
+            predict_feature_rows(model, rows),
+            key=lambda item: item["outperform_probability"],
+            reverse=True,
+        )
+    except Exception as exc:
+        console.print(f"[red]Prediction failed safely: {exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    table = Table(title="ML Shadow Ranking", box=box.SIMPLE)
+    table.add_column("Ticker", style="cyan")
+    table.add_column("As of")
+    table.add_column("P(outperform SPY)", justify="right")
+    table.add_column("Expected alpha", justify="right")
+    table.add_column("Shadow signal", justify="right")
+    for item in predictions:
+        table.add_row(
+            item["ticker"], item["sample_date"],
+            f"{item['outperform_probability'] * 100:.1f}%",
+            f"{item['expected_alpha_pct']:.2f}%",
+            "YES" if item["shadow_signal"] else "NO",
+        )
+    console.print(table)
+    for failure in failures:
+        console.print(f"[yellow]{failure}[/yellow]")
+    console.print("[dim]Advisory shadow output only; no order path reads this result.[/dim]")
+
+
 @app.command("replay-backtest")
 def replay_backtest_command(
     ticker: Optional[str] = typer.Option(
@@ -2068,15 +2606,10 @@ def replay_backtest_command(
         summarize_replay_results,
     )
     from tradingagents.risk.scorecard import Scorecard
+    from tradingagents.scheduler.runner import _scorecard_strategy_key
     from tradingagents.strategy.rules import strategy_rules_from_config
 
-    current_strategy_key = (
-        f"full_graph:{DEFAULT_CONFIG.get('strategy_version', 'unknown')}:"
-        f"{DEFAULT_CONFIG.get('llm_provider', 'unknown')}:"
-        f"{DEFAULT_CONFIG.get('quick_think_llm', 'unknown')}:"
-        f"{DEFAULT_CONFIG.get('deep_think_llm', 'unknown')}"
-    )
-    selected_strategy_key = strategy_key or current_strategy_key
+    selected_strategy_key = strategy_key or _scorecard_strategy_key()
     requested_tickers = []
     for value in ([ticker] if ticker else []) + ((tickers or "").split(",")):
         normalized = value.strip().upper()
@@ -2136,7 +2669,7 @@ def replay_backtest_command(
     output_report.write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 "strategy_key": selected_strategy_key,
                 "stored_decisions": stored_decisions,
@@ -2146,6 +2679,33 @@ def replay_backtest_command(
             sort_keys=True,
         ),
         encoding="utf-8",
+    )
+    experiment_id = scorecard.record_experiment(
+        kind="graph-decision-replay",
+        strategy_key=selected_strategy_key,
+        config={
+            "initial_cash": initial_cash,
+            "rules": rules.__dict__,
+            "scorecard_size_cap": ReplayConfig().scorecard_size_cap,
+        },
+        data={
+            "tickers": result["tickers"],
+            "start_date": result["start_date"],
+            "end_date": result["end_date"],
+            "stored_decisions": stored_decisions,
+        },
+        metrics={
+            key: result[key]
+            for key in (
+                "ticker_count",
+                "num_trades",
+                "total_return_pct",
+                "benchmark_return_pct",
+                "alpha_pct",
+                "max_drawdown_pct",
+            )
+        },
+        artifact_path=str(output_report.resolve()),
     )
     table = Table(title="Cross-Ticker Graph Decision Replay", box=box.SIMPLE)
     table.add_column("Metric", style="cyan")
@@ -2158,6 +2718,7 @@ def replay_backtest_command(
     table.add_row("Alpha", f"{result['alpha_pct']:+.2f}%")
     table.add_row("Worst Drawdown", f"{result['max_drawdown_pct']:.2f}%")
     console.print(table)
+    console.print(f"Experiment ID: {experiment_id}")
     console.print(f"Validation report: {output_report.resolve()}")
 
 

@@ -1,18 +1,20 @@
-from tradingagents.graph.setup import DEBATE_PATH_MAP, RISK_ANALYSIS_PATH_MAP
+from unittest.mock import MagicMock
+
+from tradingagents.graph.conditional_logic import ConditionalLogic
+from tradingagents.graph.setup import GraphSetup
 
 
-def test_shared_debate_path_map_contains_all_router_targets():
-    assert set(DEBATE_PATH_MAP) == {
-        "Bull Researcher",
-        "Bear Researcher",
-        "Research Manager",
-    }
+def test_active_graph_skips_repetitive_debate_and_trader_nodes():
+    setup = GraphSetup(
+        MagicMock(),
+        MagicMock(),
+        {"insider": MagicMock()},
+        ConditionalLogic(),
+    )
 
+    graph = setup.setup_graph(["insider"])
 
-def test_shared_risk_path_map_contains_all_router_targets():
-    assert set(RISK_ANALYSIS_PATH_MAP) == {
-        "Aggressive Analyst",
-        "Conservative Analyst",
-        "Neutral Analyst",
-        "Portfolio Manager",
-    }
+    assert "Portfolio Manager" in graph.nodes
+    assert "Bull Researcher" not in graph.nodes
+    assert "Trader" not in graph.nodes
+    assert "Aggressive Analyst" not in graph.nodes

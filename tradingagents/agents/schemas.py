@@ -191,8 +191,9 @@ class PortfolioDecision(BaseModel):
     )
     investment_thesis: str = Field(
         description=(
-            "Detailed reasoning anchored in specific evidence from the analysts' "
-            "debate. If prior lessons are referenced in the prompt context, "
+            "Detailed reasoning anchored in specific evidence from the specialist "
+            "reports, including bullish evidence, bearish evidence, and data quality. "
+            "If prior lessons are referenced in the prompt context, "
             "incorporate them; otherwise rely solely on the current analysis."
         ),
     )

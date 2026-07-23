@@ -685,6 +685,17 @@ class TestPortfolioManagerInjection:
         assert "Lessons from prior decisions and outcomes" in captured["prompt"]
         assert "Great call." in captured["prompt"]
 
+    def test_pm_prompt_uses_specialist_reports_directly(self):
+        captured = {}
+        pm_node = create_portfolio_manager(_structured_pm_llm(captured))
+
+        pm_node(_make_pm_state())
+
+        assert "Market report." in captured["prompt"]
+        assert "Sentiment report." in captured["prompt"]
+        assert "Fundamentals report." in captured["prompt"]
+        assert "Risk debate history." not in captured["prompt"]
+
     def test_pm_no_past_context_no_section(self):
         """PM prompt omits the lessons section entirely when past_context is empty."""
         captured = {}

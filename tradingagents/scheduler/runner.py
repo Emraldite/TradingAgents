@@ -54,7 +54,7 @@ LIMIT_SLIPPAGE_BPS = int(DEFAULT_CONFIG.get("limit_slippage_bps", 20))
 SHADOW_SLIPPAGE_BPS = int(DEFAULT_CONFIG.get("shadow_slippage_bps", 10))
 MAX_UNIVERSE_SIZE = int(DEFAULT_CONFIG.get("discovery_max_candidates", 5))
 GRAPH_ANALYSTS = ["insider", "market", "social", "news", "fundamentals"]
-STRATEGY_IMPLEMENTATION_VERSION = "sec-insider-full-discovery-v2"
+STRATEGY_IMPLEMENTATION_VERSION = "sec-insider-lean-graph-v3"
 GRAPH_BUY_RATINGS = {"Buy", "Overweight"}
 STRATEGY_RULES = strategy_rules_from_config(DEFAULT_CONFIG)
 APPROVED_FREE_GOOGLE_MODELS = frozenset(
@@ -1262,6 +1262,16 @@ def run_cycle(
                 mode=execution_mode,
                 entry_price=close,
                 final_trade_decision=analysis["final_trade_decision"],
+                evidence={
+                    name: analysis.get(name, "")
+                    for name in (
+                        "market_report",
+                        "insider_report",
+                        "sentiment_report",
+                        "news_report",
+                        "fundamentals_report",
+                    )
+                },
                 strategy_version=str(DEFAULT_CONFIG.get("strategy_version", "unknown")),
                 config={
                     "rules": STRATEGY_RULES.__dict__,

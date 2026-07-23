@@ -71,6 +71,7 @@ class Scorecard:
                     mode TEXT NOT NULL,
                     entry_price REAL NOT NULL,
                     final_trade_decision TEXT,
+                    evidence_json TEXT,
                     strategy_version TEXT,
                     config_json TEXT,
                     confidence REAL,
@@ -100,12 +101,31 @@ class Scorecard:
                 "strategy_version",
                 "config_json",
                 "confidence",
+                "evidence_json",
             ):
                 if column not in columns:
-                    definition = "TEXT" if column in {"strategy_version", "config_json"} else "REAL"
+                    definition = (
+                        "TEXT"
+                        if column in {"strategy_version", "config_json", "evidence_json"}
+                        else "REAL"
+                    )
                     conn.execute(
                         f"ALTER TABLE scorecard_decisions ADD COLUMN {column} {definition}"
                     )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS scorecard_experiments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    kind TEXT NOT NULL,
+                    strategy_key TEXT NOT NULL,
+                    config_json TEXT NOT NULL,
+                    data_json TEXT NOT NULL,
+                    metrics_json TEXT NOT NULL,
+                    artifact_path TEXT,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
 
     def record_decision(
         self,
@@ -120,6 +140,7 @@ class Scorecard:
         mode: str,
         entry_price: float,
         final_trade_decision: str,
+        evidence: dict[str, Any] | None = None,
         strategy_version: str | None = None,
         config: dict[str, Any] | None = None,
         confidence: float | None = None,
@@ -134,10 +155,10 @@ class Scorecard:
                 INSERT OR IGNORE INTO scorecard_decisions (
                     strategy_key, ticker, trade_date, rating, model_provider,
                     quick_model, deep_model, mode, entry_price,
-                    final_trade_decision, strategy_version, config_json, confidence,
-                    horizon_days, benchmark_ticker, created_at
+                    final_trade_decision, evidence_json, strategy_version,
+                    config_json, confidence, horizon_days, benchmark_ticker, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     strategy_key,
@@ -150,6 +171,7 @@ class Scorecard:
                     mode,
                     entry_price,
                     final_trade_decision,
+                    json.dumps(evidence, sort_keys=True) if evidence else None,
                     strategy_version,
                     json.dumps(config, sort_keys=True) if config else None,
                     confidence,
@@ -168,6 +190,71 @@ class Scorecard:
                 ).fetchone()
                 return int(row["id"]) if row else None
             return int(cursor.lastrowid)
+
+    def decision_artifact(self, decision_id: int) -> dict[str, Any] | None:
+        """Return one stored decision and its exact evidence without live API calls."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM scorecard_decisions WHERE id=?", (decision_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        result = dict(row)
+        for column in ("config_json", "evidence_json"):
+            raw = result.pop(column, None)
+            result[column.removesuffix("_json")] = json.loads(raw) if raw else {}
+        return result
+
+    def record_experiment(
+        self,
+        *,
+        kind: str,
+        strategy_key: str,
+        config: dict[str, Any],
+        data: dict[str, Any],
+        metrics: dict[str, Any],
+        artifact_path: str | None = None,
+    ) -> int:
+        """Persist enough metadata to reproduce and compare one validation run."""
+        if not kind.strip() or not strategy_key.strip():
+            raise ValueError("kind and strategy_key are required")
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO scorecard_experiments (
+                    kind, strategy_key, config_json, data_json, metrics_json,
+                    artifact_path, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    kind,
+                    strategy_key,
+                    json.dumps(config, sort_keys=True),
+                    json.dumps(data, sort_keys=True),
+                    json.dumps(metrics, sort_keys=True),
+                    artifact_path,
+                    datetime.utcnow().isoformat(timespec="seconds"),
+                ),
+            )
+            return int(cursor.lastrowid)
+
+    def experiments(self, limit: int = 20) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM scorecard_experiments
+                ORDER BY id DESC LIMIT ?
+                """,
+                (max(1, min(limit, 100)),),
+            ).fetchall()
+        results = []
+        for row in rows:
+            item = dict(row)
+            for column in ("config_json", "data_json", "metrics_json"):
+                raw = item.pop(column)
+                item[column.removesuffix("_json")] = json.loads(raw)
+            results.append(item)
+        return results
 
     def record_outcome(
         self,
@@ -467,6 +554,44 @@ class Scorecard:
             ).fetchall()
 
         return [self._format_summary_row(str(row["strategy_key"]), row) for row in rows]
+
+    def leaderboard(self) -> list[dict[str, float | int | str]]:
+        """Rank strategy versions against SPY's zero-alpha control."""
+        rows = self.summaries()
+        resolved = max((int(row["resolved_decisions"]) for row in rows), default=0)
+        rows.append(
+            {
+                "strategy_key": self.benchmark_ticker,
+                "total_decisions": resolved,
+                "pending_decisions": 0,
+                "resolved_decisions": resolved,
+                "win_rate_pct": 0.0,
+                "avg_alpha_pct": 0.0,
+                "max_drawdown_pct": 0.0,
+                "avg_score": 0.0,
+                "eligible": True,
+            }
+        )
+        for row in rows:
+            row.setdefault(
+                "eligible",
+                int(row["resolved_decisions"]) >= self.min_resolved_decisions,
+            )
+        ranked = sorted(
+            rows,
+            key=lambda row: (
+                bool(row["eligible"]),
+                float(row["avg_alpha_pct"]),
+                row["strategy_key"] == self.benchmark_ticker,
+                float(row["max_drawdown_pct"]),
+                int(row["resolved_decisions"]),
+            ),
+            reverse=True,
+        )
+        return [
+            {**row, "rank": index, "role": "champion" if index == 1 else "challenger"}
+            for index, row in enumerate(ranked, start=1)
+        ]
 
     def decisions_for_ticker(
         self,
