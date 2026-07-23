@@ -9,6 +9,34 @@ import pandas as pd
 REQUIRED_COLUMNS = ("Date", "Open", "High", "Low", "Close", "Volume")
 
 
+def trim_incomplete_trailing_rows(
+    data: pd.DataFrame,
+    *,
+    max_rows: int = 3,
+) -> tuple[pd.DataFrame, int]:
+    """Remove only a short invalid suffix, such as an unfinished current bar."""
+    if max_rows < 0:
+        raise ValueError("max_rows cannot be negative")
+    if any(column not in data.columns for column in REQUIRED_COLUMNS):
+        return data.copy(), 0
+
+    frame = data.copy()
+    parsed_dates = pd.to_datetime(frame["Date"], errors="coerce")
+    numeric = frame.loc[:, REQUIRED_COLUMNS[1:]].apply(pd.to_numeric, errors="coerce")
+    invalid = parsed_dates.isna() | numeric.isna().any(axis=1)
+    if not invalid.any():
+        return frame, 0
+
+    invalid_positions = [position for position, value in enumerate(invalid.tolist()) if value]
+    first_invalid = invalid_positions[0]
+    trailing_count = len(frame) - first_invalid
+    if invalid_positions != list(range(first_invalid, len(frame))):
+        return frame, 0
+    if trailing_count > max_rows:
+        return frame, 0
+    return frame.iloc[:first_invalid].copy(), trailing_count
+
+
 def audit_market_data(data: pd.DataFrame) -> dict[str, Any]:
     """Check OHLCV data for errors that can invalidate a backtest or ML dataset."""
     issues: list[dict[str, Any]] = []

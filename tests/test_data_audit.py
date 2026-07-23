@@ -1,6 +1,10 @@
 import pandas as pd
 
-from backtests.data_audit import audit_feature_lookahead, audit_market_data
+from backtests.data_audit import (
+    audit_feature_lookahead,
+    audit_market_data,
+    trim_incomplete_trailing_rows,
+)
 from backtests.walk_forward import build_walk_forward_features
 
 
@@ -35,6 +39,28 @@ def test_market_data_audit_reports_duplicate_and_invalid_range():
 
     assert result["ok"] is False
     assert {"duplicate_dates", "invalid_ohlc_range"} <= codes
+
+
+def test_only_short_incomplete_suffix_is_trimmed():
+    data = _market_data(8)
+    data.loc[7, "Close"] = float("nan")
+
+    cleaned, removed = trim_incomplete_trailing_rows(data)
+
+    assert removed == 1
+    assert len(cleaned) == 7
+    assert audit_market_data(cleaned)["ok"] is True
+
+
+def test_incomplete_interior_row_is_never_silently_trimmed():
+    data = _market_data(8)
+    data.loc[3, "Close"] = float("nan")
+
+    cleaned, removed = trim_incomplete_trailing_rows(data)
+
+    assert removed == 0
+    assert len(cleaned) == 8
+    assert audit_market_data(cleaned)["ok"] is False
 
 
 def test_lookahead_audit_finds_future_dependent_feature():

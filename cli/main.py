@@ -2318,7 +2318,7 @@ def ml_build_sp500_command(
     """Build a point-in-time historical S&P 500 ML dataset without LLM calls."""
     import yfinance as yf
 
-    from backtests.data_audit import audit_market_data
+    from backtests.data_audit import audit_market_data, trim_incomplete_trailing_rows
     from backtests.ml_shadow import MLShadowLedger, build_ml_samples
     from backtests.sp500_history import (
         content_sha256,
@@ -2385,9 +2385,28 @@ def ml_build_sp500_command(
             "throttling; wait and rerun the same idempotent batch.[/red]"
         )
         raise typer.Exit(1)
-    if not audit_market_data(benchmark)["ok"]:
-        console.print("[red]SPY data failed its health audit; nothing was written.[/red]")
+    benchmark, trimmed_benchmark_rows = trim_incomplete_trailing_rows(benchmark)
+    benchmark_audit = audit_market_data(benchmark)
+    if not benchmark_audit["ok"]:
+        console.print(
+            f"[red]SPY data failed its health audit; nothing was written. "
+            f"Rows={benchmark_audit['rows']}, range={benchmark_audit['start']} to "
+            f"{benchmark_audit['end']}.[/red]"
+        )
+        for issue in benchmark_audit["issues"]:
+            console.print(
+                f"[red]{issue['code']} ({issue['count']}): {issue['message']}[/red]"
+            )
+        console.print(
+            "[yellow]This is often a temporary Yahoo response. Rerun the same "
+            "idempotent command; do not train from a failed build.[/yellow]"
+        )
         raise typer.Exit(1)
+    if trimmed_benchmark_rows:
+        console.print(
+            f"[yellow]Removed {trimmed_benchmark_rows} incomplete trailing SPY "
+            "row(s), then passed the audit.[/yellow]"
+        )
 
     ledger = MLShadowLedger(database)
     inserted = 0
@@ -2409,6 +2428,7 @@ def ml_build_sp500_command(
                     }
                 )
                 continue
+            stock, _ = trim_incomplete_trailing_rows(stock)
             audit = audit_market_data(stock)
             if not audit["ok"]:
                 failures.append(
