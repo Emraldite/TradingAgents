@@ -2515,6 +2515,283 @@ def ml_build_sp500_command(
         raise typer.Exit(1)
 
 
+@app.command("ml-build-sp500-v2")
+def ml_build_sp500_v2_command(
+    start: str = typer.Option(
+        "2010-01-01", "--start", help="First point-in-time membership date to include."
+    ),
+    end: str = typer.Option(
+        datetime.date.today().isoformat(), "--end", help="Last decision date to include."
+    ),
+    horizon_days: int = typer.Option(
+        10, "--horizon-days", min=1, max=60, help="Next-open holding sessions."
+    ),
+    database: Path = typer.Option(
+        Path("data/ml_shadow.db"), "--database", help="Versioned ML sample ledger."
+    ),
+    price_cache: Path = typer.Option(
+        Path("data/ml_prices.db"),
+        "--price-cache",
+        help="Persistent raw OHLCV cache reused by future feature versions.",
+    ),
+    membership_cache: Path = typer.Option(
+        Path("data/sp500_history.csv"),
+        "--membership-cache",
+        help="Cached point-in-time constituent snapshots.",
+    ),
+    source_url: str = typer.Option(
+        "https://raw.githubusercontent.com/fja05680/sp500/master/"
+        "S%26P%20500%20Historical%20Components%20%26%20Changes%20%28Updated%29.csv",
+        "--source-url",
+        help="Public date,tickers snapshot CSV; ignored when membership cache exists.",
+    ),
+    refresh_membership: bool = typer.Option(
+        False, "--refresh-membership", help="Refresh the membership snapshot cache."
+    ),
+    refresh_prices: bool = typer.Option(
+        False,
+        "--refresh-prices",
+        help="Redownload symbols even when a covering cache attempt exists.",
+    ),
+    offset: int = typer.Option(
+        0, "--offset", min=0, help="Skip alphabetized tickers for resumable batches."
+    ),
+    max_tickers: Optional[int] = typer.Option(
+        None, "--max-tickers", min=1, help="Optional batch size."
+    ),
+):
+    """Build execution-aligned V2 samples and a reusable raw-price cache."""
+    import pandas as pd
+    import yfinance as yf
+
+    from backtests.data_audit import audit_market_data, trim_incomplete_trailing_rows
+    from backtests.ml_shadow import MLShadowLedger
+    from backtests.ml_v2 import (
+        FEATURE_VERSION_V2,
+        HistoricalPriceCache,
+        build_v2_samples,
+    )
+    from backtests.sp500_history import (
+        content_sha256,
+        fetch_membership_history,
+        filter_samples_for_membership,
+        intervals_by_ticker,
+        parse_membership_history,
+        tickers_overlapping,
+        yahoo_ticker,
+    )
+
+    try:
+        start_date = datetime.date.fromisoformat(start)
+        end_date = datetime.date.fromisoformat(end)
+    except ValueError as exc:
+        console.print(f"[red]Invalid ISO date: {exc}[/red]")
+        raise typer.Exit(2) from exc
+    if start_date >= end_date:
+        console.print("[red]--start must be before --end.[/red]")
+        raise typer.Exit(2)
+
+    try:
+        content, source = fetch_membership_history(
+            source_url=source_url,
+            cache_path=membership_cache,
+            refresh=refresh_membership,
+        )
+        grouped = intervals_by_ticker(parse_membership_history(content))
+    except Exception as exc:
+        console.print(f"[red]Could not load point-in-time membership history: {exc}[/red]")
+        raise typer.Exit(1) from exc
+    all_symbols = tickers_overlapping(grouped, start_date, end_date)
+    symbols = all_symbols[offset : offset + max_tickers if max_tickers else None]
+    if not symbols:
+        console.print("[red]No historical constituents matched this V2 batch.[/red]")
+        raise typer.Exit(2)
+
+    coverage_start = min(item.start_date for values in grouped.values() for item in values)
+    coverage_end = max(item.end_date for values in grouped.values() for item in values)
+    console.print(
+        f"V2 point-in-time source: {len(all_symbols)} eligible symbols | "
+        f"coverage {coverage_start} to {coverage_end} | batch {offset + 1}-"
+        f"{offset + len(symbols)}"
+    )
+    if end_date > coverage_end:
+        console.print(
+            f"[yellow]Membership source ends {coverage_end}; later decision dates "
+            "will not be guessed.[/yellow]"
+        )
+
+    # One year of warmup supports 252-day features before the requested sample start.
+    download_start = (start_date - datetime.timedelta(days=400)).isoformat()
+    # Fetch enough future sessions to label decisions near a historical --end date.
+    download_end = min(
+        end_date + datetime.timedelta(days=horizon_days * 2 + 10),
+        datetime.date.today() + datetime.timedelta(days=1),
+    ).isoformat()
+    cache = HistoricalPriceCache(price_cache)
+    ledger = MLShadowLedger(database)
+
+    def load_or_download(symbol: str) -> tuple[pd.DataFrame, str]:
+        provider_symbol = yahoo_ticker(symbol)
+        attempt = (
+            None
+            if refresh_prices
+            else cache.reusable_attempt(symbol, download_start, download_end)
+        )
+        if attempt is not None:
+            if attempt["status"] != "success":
+                return cache.load(symbol), str(attempt["status"])
+            return cache.load(symbol), "cached"
+        try:
+            downloaded = _download_yfinance_quiet(
+                yf,
+                provider_symbol,
+                start=download_start,
+                end=download_end,
+                progress=False,
+                auto_adjust=True,
+                multi_level_index=False,
+            ).reset_index()
+        except Exception as exc:
+            cache.record_download(
+                symbol,
+                pd.DataFrame(),
+                requested_start=download_start,
+                requested_end=download_end,
+                status="download_error",
+                error=str(exc),
+            )
+            return cache.load(symbol), "download_error"
+        if downloaded.empty:
+            cache.record_download(
+                symbol,
+                downloaded,
+                requested_start=download_start,
+                requested_end=download_end,
+                status="unavailable",
+                error="Yahoo returned no historical prices",
+            )
+            return downloaded, "unavailable"
+        downloaded, _ = trim_incomplete_trailing_rows(downloaded)
+        audit = audit_market_data(downloaded)
+        if not audit["ok"]:
+            cache.record_download(
+                symbol,
+                pd.DataFrame(),
+                requested_start=download_start,
+                requested_end=download_end,
+                status="data_audit",
+                error="; ".join(issue["code"] for issue in audit["issues"]),
+            )
+            return cache.load(symbol), "data_audit"
+        cache.record_download(
+            symbol,
+            downloaded,
+            requested_start=download_start,
+            requested_end=download_end,
+        )
+        return cache.load(symbol), "downloaded"
+
+    benchmark, benchmark_status = load_or_download("SPY")
+    if benchmark_status not in {"cached", "downloaded"} or benchmark.empty:
+        console.print(
+            f"[red]SPY cache/download failed ({benchmark_status}); no V2 samples "
+            "were written.[/red]"
+        )
+        raise typer.Exit(1)
+    benchmark_audit = audit_market_data(benchmark)
+    if not benchmark_audit["ok"]:
+        console.print("[red]Cached SPY data failed audit; use --refresh-prices.[/red]")
+        for issue in benchmark_audit["issues"]:
+            console.print(f"[red]{issue['code']}: {issue['message']}[/red]")
+        raise typer.Exit(1)
+
+    inserted = 0
+    succeeded = 0
+    cached_symbols = 0
+    failures: list[dict[str, str]] = []
+    for index, symbol in enumerate(symbols, start=1):
+        prices, status = load_or_download(symbol)
+        if status == "cached":
+            cached_symbols += 1
+        if status not in {"cached", "downloaded"} or prices.empty:
+            failures.append({"ticker": symbol, "category": status})
+        else:
+            try:
+                samples = build_v2_samples(
+                    prices,
+                    benchmark,
+                    ticker=symbol,
+                    horizon_days=horizon_days,
+                )
+                samples = [
+                    sample
+                    for sample in samples
+                    if start_date
+                    <= datetime.date.fromisoformat(sample["sample_date"])
+                    <= end_date
+                ]
+                samples = filter_samples_for_membership(samples, grouped[symbol])
+                inserted += ledger.record(samples)
+                succeeded += 1
+            except Exception as exc:
+                failures.append(
+                    {
+                        "ticker": symbol,
+                        "category": "feature_build",
+                        "error": str(exc),
+                    }
+                )
+        if index % 25 == 0 or index == len(symbols):
+            console.print(
+                f"Processed {index}/{len(symbols)} | successful {succeeded} | "
+                f"cached {cached_symbols} | failed {len(failures)} | "
+                f"new V2 samples {inserted}"
+            )
+
+    build_id = ledger.record_build(
+        {
+            "universe": "sp500-point-in-time-v2",
+            "source": source,
+            "source_sha256": content_sha256(content),
+            "start_date": start,
+            "end_date": end,
+            "horizon_days": horizon_days,
+            "attempted": len(symbols),
+            "succeeded": succeeded,
+            "failed": len(failures),
+            "inserted": inserted,
+            "feature_version": FEATURE_VERSION_V2,
+            "execution_convention": "prior-close features; next-open to future-open label",
+            "price_cache": str(price_cache),
+            "cached_symbols": cached_symbols,
+            "offset": offset,
+            "failure_details": failures,
+        }
+    )
+    from collections import Counter
+
+    failure_counts = Counter(item["category"] for item in failures)
+    cache_summary = cache.summary()
+    console.print(
+        f"V2 build {build_id}: inserted {inserted:,} new samples | raw cache "
+        f"{cache_summary['rows']:,} rows across {cache_summary['tickers']:,} symbols."
+    )
+    if failure_counts:
+        console.print(
+            "[yellow]Skipped: "
+            + ", ".join(
+                f"{category}={count}"
+                for category, count in sorted(failure_counts.items())
+            )
+            + ". Details recorded in SQLite.[/yellow]"
+        )
+    console.print(
+        "[dim]V2 is research-only and remains disconnected from order execution.[/dim]"
+    )
+    if succeeded == 0:
+        raise typer.Exit(1)
+
+
 @app.command("ml-train")
 def ml_train_command(
     database: Path = typer.Option(
@@ -2606,6 +2883,11 @@ def ml_train_lightgbm_command(
     horizon_days: int = typer.Option(
         10, "--horizon-days", min=1, max=60, help="Dataset horizon to train."
     ),
+    feature_version: str = typer.Option(
+        "price-volume-v1",
+        "--feature-version",
+        help="Feature version to load; V2 uses execution-aligned labels.",
+    ),
     validation_start: Optional[str] = typer.Option(
         None, "--validation-start", help="ISO date; defaults to two calendar years back."
     ),
@@ -2650,7 +2932,11 @@ def ml_train_lightgbm_command(
 
     console.print("Loading numeric features directly from SQLite...")
     try:
-        frame, raw_features = load_ml_frame(database, horizon_days=horizon_days)
+        frame, raw_features = load_ml_frame(
+            database,
+            horizon_days=horizon_days,
+            feature_version=feature_version,
+        )
         frame, model_features, dropped_dates = add_cross_sectional_features(
             frame,
             raw_features,
@@ -2672,6 +2958,12 @@ def ml_train_lightgbm_command(
             round_trip_cost_bps=round_trip_cost_bps,
             n_jobs=threads,
             rebalance_every=rebalance_every,
+            feature_version=feature_version,
+            target_mode=(
+                "cross_sectional_rank"
+                if feature_version == "price-volume-v2"
+                else "alpha"
+            ),
         )
         report["dataset"] = {
             "database": str(database),
@@ -2680,6 +2972,7 @@ def ml_train_lightgbm_command(
             "dropped_for_small_cross_section": dropped_dates,
             "minimum_cross_section": min_cross_section,
             "observed_tickers": int(frame["ticker"].nunique()),
+            "feature_version": feature_version,
         }
         model_destination, report_destination = save_lightgbm_artifacts(
             model,
@@ -2786,12 +3079,17 @@ def ml_train_lightgbm_command(
         f"best iteration {report['best_iteration']} | "
         f"model {model_destination} | report {report_destination}"
     )
-    console.print(
-        "[bold yellow]Research-only timing limitation:[/bold yellow] "
-        "price-volume-v1 assumes entry at the sample-date open, while the live "
-        "08:45 CT cycle begins after that price. This model cannot be promoted "
-        "until execution-aligned labels are rebuilt."
-    )
+    if feature_version == "price-volume-v2":
+        console.print(
+            "[bold green]Execution-aligned research labels:[/bold green] "
+            "features stop at the prior close and entry begins at the next open."
+        )
+    else:
+        console.print(
+            "[bold yellow]Research-only timing limitation:[/bold yellow] "
+            "price-volume-v1 assumes entry at the sample-date open, while the live "
+            "08:45 CT cycle begins after that price. Use price-volume-v2."
+        )
     console.print(
         "[dim]No scheduler or order-execution module loads this model.[/dim]"
     )

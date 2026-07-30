@@ -229,6 +229,8 @@ uv run tradingagents ml-shadow --tickers AAPL,MSFT,NVDA,PLTR --start 2020-01-01
 uv run tradingagents ml-build-sp500 --start 2010-01-01 --horizon-days 10
 uv run tradingagents ml-train --horizon-days 10
 uv run tradingagents ml-train-lightgbm --horizon-days 10 --threads 2
+uv run tradingagents ml-build-sp500-v2 --start 2010-01-01 --horizon-days 10
+uv run tradingagents ml-train-lightgbm --feature-version price-volume-v2 --model data/ml_lightgbm_v2.txt --report data/ml_lightgbm_v2_report.json --threads 2
 uv run tradingagents ml-predict --tickers PLTR,AMD,MU,SMCI
 ```
 
@@ -254,6 +256,14 @@ uv run tradingagents ml-build-sp500 --start 2010-01-01 --offset 0 --max-tickers 
 uv run tradingagents ml-build-sp500 --start 2010-01-01 --offset 100 --max-tickers 100
 ```
 
+`ml-build-sp500-v2` fixes the V1 timing limitation by using only information
+available through the prior close and entering labels at the next tradable open.
+It adds richer trend, volatility, volume, drawdown, gap, beta, and SPY-regime
+features. Raw audited OHLCV is retained in `data/ml_prices.db`, so reruns and later
+feature versions reuse it. Failed transient downloads retry automatically; known
+unavailable symbols are skipped unless `--refresh-prices` is supplied. The same
+`--offset` and `--max-tickers` batching options are supported.
+
 `ml-train` uses global chronological train/validation/test windows. Samples whose
 future label crosses a window boundary are purged. It writes a transparent JSON
 logistic/ridge baseline, reports held-out probability and alpha metrics, and does
@@ -270,12 +280,11 @@ Ridge baseline on the exact same rows and metrics for a fair comparison. Outputs
 are `data/ml_lightgbm.txt` and `data/ml_lightgbm_report.json`; neither is imported
 by trading execution.
 
-The current `price-volume-v1` label assumes entry at the sample date's opening
+The legacy `price-volume-v1` label assumes entry at the sample date's opening
 price. The deployed bot starts at 08:45 America/Chicago, after that price was
-available, so all v1 LightGBM results are research-only even when their signal
-gate passes. Promotion requires a rebuilt feature version whose label enters at
-the next tradable open (or a timestamp-valid post-decision price), followed by a
-fresh untouched holdout and live shadow evaluation.
+available, so all V1 results have an invalid execution assumption. V2 fixes that
+specific limitation and trains on same-date future-alpha ranks, but it remains
+research-only until it passes a fresh untouched holdout and live shadow evaluation.
 
 Free Yahoo data will be missing for many delisted historical constituents. That
 failure is reported and retained in the build audit; it is not silently treated

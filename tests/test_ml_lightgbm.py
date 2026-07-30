@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 
 from backtests.ml_lightgbm import (
+    _training_target,
     add_cross_sectional_features,
     evaluate_ranked_predictions,
     load_ml_frame,
@@ -92,6 +93,21 @@ def test_dataframe_split_purges_labels_crossing_boundaries():
     assert len(split["validation"]) == 1
     assert len(split["test"]) == 1
     assert len(split["purged"]) == 2
+
+
+def test_cross_sectional_training_target_ranks_each_date_separately():
+    frame = pd.DataFrame(
+        [
+            _row("A", "2024-01-02", "2024-01-12", 0, 1, -2),
+            _row("B", "2024-01-02", "2024-01-12", 0, 1, 3),
+            _row("A", "2024-01-03", "2024-01-13", 0, 1, 100),
+            _row("B", "2024-01-03", "2024-01-13", 0, 1, 200),
+        ]
+    )
+
+    target = _training_target(frame, "cross_sectional_rank")
+
+    assert target.tolist() == [0.0, 0.5, 0.0, 0.5]
 
 
 def test_per_date_quintiles_and_cost_adjustment_are_exact():

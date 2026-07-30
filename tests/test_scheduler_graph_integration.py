@@ -143,19 +143,23 @@ def test_graph_provider_failure_marks_cycle_failed_instead_of_complete(
     monkeypatch.setattr(runner, "state_store", store)
     monkeypatch.setattr(runner, "_create_analysis_graph", lambda: object())
     monkeypatch.setattr(runner, "_create_scorecard", lambda: FakeScorecard())
+    graph_calls = []
+
+    def fail_for_daily_quota(*args):
+        graph_calls.append(args[1])
+        raise RuntimeError("429 rate_limit_exceeded: tokens per day (TPD) exhausted")
+
     monkeypatch.setattr(
         runner,
         "_run_graph_analysis",
-        lambda *args: (_ for _ in ()).throw(
-            RuntimeError("429 RESOURCE_EXHAUSTED: quota exceeded")
-        ),
+        fail_for_daily_quota,
     )
     monkeypatch.setattr(runner, "detect_manipulation", lambda ticker: {"recommendation": "ALLOW"})
     monkeypatch.setattr(runner.yf, "download", lambda *args, **kwargs: _price_frame())
     monkeypatch.setattr(runner.executor, "get_account_info", lambda: None)
     monkeypatch.setattr(runner.executor, "get_portfolio", lambda: [])
 
-    summary = runner.run_cycle(tickers=["AAPL"], mode="dry-run")
+    summary = runner.run_cycle(tickers=["AAPL", "MSFT"], mode="dry-run")
 
     assert summary["status"] == "failed"
     assert summary["analysis_failures"] == 1
@@ -164,6 +168,12 @@ def test_graph_provider_failure_marks_cycle_failed_instead_of_complete(
     assert summary["simulated"] == 0
     assert "model access and quota" in summary["reason"]
     assert summary["decisions"][0]["decision"] == "skip"
+    assert summary["decisions"][1] == {
+        "ticker": "MSFT",
+        "decision": "skip",
+        "reason": "daily_llm_token_quota_exhausted",
+    }
+    assert graph_calls == ["AAPL"]
     assert store.health_snapshot()["recent_events"][0]["component"] == "llm_graph"
 
 
@@ -206,7 +216,14 @@ def test_paper_cycle_prices_from_iex_and_does_not_count_unfilled_as_execution(
             {"final_trade_decision": "**Rating**: Buy"},
         ),
     )
-    monkeypatch.setattr(runner, "detect_manipulation", lambda ticker: {"recommendation": "ALLOW"})
+    monkeypatch.setattr(
+        runner,
+        "detect_manipulation",
+        lambda ticker: {
+            "recommendation": "UNKNOWN",
+            "error": "StockTwits timeout",
+        },
+    )
     monkeypatch.setattr(runner.yf, "download", lambda *args, **kwargs: _price_frame())
     monkeypatch.setattr(runner, "validate_trade", lambda **kwargs: (True, "ok"))
     monkeypatch.setattr(
@@ -279,3 +296,7 @@ def test_paper_cycle_prices_from_iex_and_does_not_count_unfilled_as_execution(
     assert captured["limit_price"] > 100.2
     assert store.open_positions() == []
     assert store.reserved_open_position_count() == 1
+    assert any(
+        event["component"] == "stocktwits"
+        for event in store.health_snapshot()["recent_events"]
+    )

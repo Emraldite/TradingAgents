@@ -156,6 +156,8 @@ def train_lightgbm_alpha_model(
     round_trip_cost_bps: int = 40,
     n_jobs: int = 2,
     rebalance_every: int = 10,
+    feature_version: str = FEATURE_VERSION,
+    target_mode: str = "alpha",
 ) -> tuple[Any, dict[str, Any]]:
     """Train a nonlinear alpha regressor and evaluate date-relative rankings."""
     import lightgbm as lgb
@@ -166,6 +168,8 @@ def train_lightgbm_alpha_model(
     ticker_count = int(frame["ticker"].nunique())
     if ticker_count < min_tickers:
         raise ValueError(f"need at least {min_tickers} tickers; found {ticker_count}")
+    if target_mode not in {"alpha", "cross_sectional_rank"}:
+        raise ValueError("target_mode must be alpha or cross_sectional_rank")
     splits = split_frame_chronologically(
         frame,
         validation_start=validation_start,
@@ -189,15 +193,17 @@ def train_lightgbm_alpha_model(
     }
     train = splits["train"]
     validation = splits["validation"]
+    for split in splits.values():
+        split["training_target"] = _training_target(split, target_mode)
     train_weight = _equal_date_weights(train)
     validation_weight = _equal_date_weights(validation)
     evaluation_model = lgb.LGBMRegressor(**params)
     evaluation_model.fit(
         train[feature_names],
-        train["alpha_pct"],
+        train["training_target"],
         sample_weight=train_weight,
         eval_X=validation[feature_names],
-        eval_y=validation["alpha_pct"],
+        eval_y=validation["training_target"],
         eval_sample_weight=[validation_weight],
         eval_metric="l1",
         callbacks=[
@@ -217,6 +223,8 @@ def train_lightgbm_alpha_model(
         roc_auc_score=roc_auc_score,
         mean_absolute_error=mean_absolute_error,
     )
+    if target_mode == "cross_sectional_rank":
+        validation_metrics["alpha_mae_pct"] = None
 
     deploy = pd.concat((train, validation), ignore_index=True)
     deploy_weight = _equal_date_weights(deploy)
@@ -224,7 +232,7 @@ def train_lightgbm_alpha_model(
     model = lgb.LGBMRegressor(**deploy_params)
     model.fit(
         deploy[feature_names],
-        deploy["alpha_pct"],
+        deploy["training_target"],
         sample_weight=deploy_weight,
     )
     test = splits["test"]
@@ -237,6 +245,8 @@ def train_lightgbm_alpha_model(
         roc_auc_score=roc_auc_score,
         mean_absolute_error=mean_absolute_error,
     )
+    if target_mode == "cross_sectional_rank":
+        test_metrics["alpha_mae_pct"] = None
 
     importance = sorted(
         (
@@ -261,7 +271,13 @@ def train_lightgbm_alpha_model(
 
     report = {
         "model_version": MODEL_VERSION,
-        "feature_version": FEATURE_VERSION,
+        "feature_version": feature_version,
+        "target_mode": target_mode,
+        "prediction_units": (
+            "cross-sectional score; alpha MAE is not applicable"
+            if target_mode == "cross_sectional_rank"
+            else "percentage-point alpha"
+        ),
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "validation_start": pd.Timestamp(validation_start).date().isoformat(),
         "test_start": pd.Timestamp(test_start).date().isoformat(),
@@ -272,9 +288,10 @@ def train_lightgbm_alpha_model(
         "holdout_status": (
             "development holdout; prior linear results on these dates were inspected"
         ),
-        "timing_limit": (
-            "price-volume-v1 labels assume sample-date open entry; the live 08:45 CT "
-            "cycle starts after that price. Research-only until execution-aligned labels."
+        "execution_timing": (
+            "prior-close features with next-tradable-open entry"
+            if feature_version == "price-volume-v2"
+            else "sample-date open entry; unavailable to the live 08:45 CT decision"
         ),
         "sample_counts": {
             "train": len(train),
@@ -290,6 +307,7 @@ def train_lightgbm_alpha_model(
             feature_names,
             round_trip_cost_bps=round_trip_cost_bps,
             rebalance_every=rebalance_every,
+            target_mode=target_mode,
         ),
         "feature_importance": importance,
         "safety": "shadow-only; never consumed by the scheduler or order router",
@@ -424,6 +442,7 @@ def train_fair_linear_baseline(
     *,
     round_trip_cost_bps: int,
     rebalance_every: int,
+    target_mode: str = "alpha",
 ) -> dict[str, Any]:
     """Fit Ridge on identical rows/features and evaluate with identical date buckets."""
     from sklearn.linear_model import Ridge
@@ -439,7 +458,7 @@ def train_fair_linear_baseline(
     validation_model = Ridge(alpha=10.0)
     validation_model.fit(
         train_scaler.transform(train[feature_names]),
-        train["alpha_pct"],
+        train["training_target"],
         sample_weight=_equal_date_weights(train),
     )
     validation_prediction = validation_model.predict(
@@ -453,6 +472,8 @@ def train_fair_linear_baseline(
         roc_auc_score=roc_auc_score,
         mean_absolute_error=mean_absolute_error,
     )
+    if target_mode == "cross_sectional_rank":
+        validation_metrics["alpha_mae_pct"] = None
 
     deploy = pd.concat((train, validation), ignore_index=True)
     deploy_weight = _equal_date_weights(deploy)
@@ -463,7 +484,7 @@ def train_fair_linear_baseline(
     model = Ridge(alpha=10.0)
     model.fit(
         deploy_scaler.transform(deploy[feature_names]),
-        deploy["alpha_pct"],
+        deploy["training_target"],
         sample_weight=deploy_weight,
     )
     test = splits["test"]
@@ -476,11 +497,24 @@ def train_fair_linear_baseline(
         roc_auc_score=roc_auc_score,
         mean_absolute_error=mean_absolute_error,
     )
+    if target_mode == "cross_sectional_rank":
+        test_metrics["alpha_mae_pct"] = None
     return {
         "model_version": "fair-cross-sectional-ridge-v1",
+        "target_mode": target_mode,
         "validation_metrics": validation_metrics,
         "test_metrics": test_metrics,
     }
+
+
+def _training_target(frame: pd.DataFrame, target_mode: str) -> pd.Series:
+    if target_mode == "alpha":
+        return frame["alpha_pct"].astype(float)
+    return (
+        frame.groupby("sample_date", sort=False)["alpha_pct"]
+        .rank(method="average", pct=True)
+        .sub(0.5)
+    )
 
 
 def compare_linear_baseline(

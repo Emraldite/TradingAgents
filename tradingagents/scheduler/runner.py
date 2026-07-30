@@ -1170,13 +1170,12 @@ def run_cycle(
             continue
 
         manipulation = detect_manipulation(ticker)
-        if manipulation.get("recommendation") == "UNKNOWN" and execution_mode in {"paper", "real"}:
-            reason = "social manipulation data unavailable"
+        if manipulation.get("recommendation") == "UNKNOWN":
+            reason = "social manipulation data unavailable; continuing without that signal"
+            logger.warning("%s: %s", ticker, reason)
             state_store.record_health_event(
                 "warning", "stocktwits", reason, {"ticker": ticker, "error": manipulation.get("error")}
             )
-            decisions.append({"ticker": ticker, "decision": "skip", "reason": reason})
-            continue
         if manipulation["recommendation"] == "REJECT":
             logger.info("%s rejected by manipulation detector", ticker)
             decisions.append(
@@ -1222,7 +1221,8 @@ def run_cycle(
             rating, analysis = _run_graph_analysis(graph, ticker, trade_date)
         except Exception as exc:
             graph_failures += 1
-            error_text = str(exc)
+            full_error_text = str(exc)
+            error_text = full_error_text
             if len(error_text) > 500:
                 error_text = error_text[:497] + "..."
             logger.warning("Trading graph failed for %s: %s", ticker, error_text)
@@ -1239,6 +1239,25 @@ def run_cycle(
                     "reason": f"graph: {error_text}",
                 }
             )
+            normalized_error = full_error_text.lower()
+            daily_quota_exhausted = "tokens per day" in normalized_error or (
+                "tpd" in normalized_error and "rate_limit" in normalized_error
+            )
+            if daily_quota_exhausted:
+                remaining_tickers = target_tickers[ticker_number:]
+                logger.warning(
+                    "Daily LLM token quota exhausted; skipping %d remaining tickers",
+                    len(remaining_tickers),
+                )
+                decisions.extend(
+                    {
+                        "ticker": remaining_ticker,
+                        "decision": "skip",
+                        "reason": "daily_llm_token_quota_exhausted",
+                    }
+                    for remaining_ticker in remaining_tickers
+                )
+                break
             continue
         graph_successes += 1
         logger.info(
